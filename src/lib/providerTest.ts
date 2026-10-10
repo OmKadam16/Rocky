@@ -13,6 +13,9 @@ export async function testLlmKey(providerRaw: string, modelRaw: string, apiKey: 
   const model = resolveModelId(modelRaw, provider);
   const key = apiKey.trim();
   if (!key) return { ok: false, message: "Paste a key first." };
+  // Gemini 3.x are thinking models: a 1-token cap collides with the thinking
+  // budget and fails closed, so probe uncapped — a "hi" reply is tiny anyway.
+  const cappedProbe = provider !== "Gemini";
   const baseURL = PROVIDER_BASE_URL[provider];
   const mk = () =>
     new OpenAI({
@@ -29,11 +32,11 @@ export async function testLlmKey(providerRaw: string, modelRaw: string, apiKey: 
   try {
     const client = mk();
     try {
-      await client.chat.completions.create(body({ max_tokens: 1 }) as never);
+      await client.chat.completions.create(body(cappedProbe ? { max_tokens: 1 } : {}) as never);
       return { ok: true, message: "Connected." };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/max_tokens|max_completion_tokens|unsupported.*token/i.test(msg)) {
+      if (cappedProbe && /max_tokens|max_completion_tokens|unsupported.*token/i.test(msg)) {
         const client2 = mk();
         await client2.chat.completions.create(body({ max_completion_tokens: 4 }) as never);
         return { ok: true, message: "Connected." };
@@ -41,7 +44,8 @@ export async function testLlmKey(providerRaw: string, modelRaw: string, apiKey: 
       throw e;
     }
   } catch (e) {
-    return { ok: false, message: plainError(e) };
+    // Name the provider + model so a failure is diagnosable at a glance.
+    return { ok: false, message: `${provider} ${model}: ${plainError(e)}` };
   }
 }
 

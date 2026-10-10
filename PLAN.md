@@ -206,3 +206,5 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   (Computer Use preview). Still `tested:false` until tool-call verification; planner default
   stays GPT-4o. Key handling unchanged: Gemini key lives as a Supabase secret set by Om,
   never in code or chat.
+- 2026-10-10: Gemini key probe fixed (`providerTest.ts`): thinking models fail closed on a
+  1-token cap, so Gemini probes uncapped; failures now name provider + model for diagnosis.
