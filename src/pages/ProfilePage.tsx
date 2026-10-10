@@ -16,6 +16,7 @@ import {
   resolveModelId,
 } from "../lib/models";
 import { testElevenKey, testLlmKey } from "../lib/providerTest";
+import { BROWSER_MODEL } from "../lib/browserAgent";
 import { MEMORY_MODEL, checkOllama, hasMemoryModel } from "../lib/ollama";
 import { runVoiceSelfTest, type VoiceCheckStage } from "../lib/voiceCheck";
 import DevicesSection from "../components/DevicesSection";
@@ -295,7 +296,7 @@ export default function ProfilePage() {
                         onClick={async () => {
                           setBrowserTesting(true);
                           setBrowserTest(null);
-                          const r = await testLlmKey("OpenAI", "gpt-5.4", browserKey);
+                          const r = await testLlmKey("OpenAI", BROWSER_MODEL, browserKey);
                           setBrowserTesting(false);
                           setBrowserTest(r);
                         }}

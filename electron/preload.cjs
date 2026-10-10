@@ -28,6 +28,16 @@ contextBridge.exposeInMainWorld("rocky", {
   shell: {
     openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   },
+  browser: {
+    /** False in a plain browser — the planner then hands over a link instead. */
+    available: () => ipcRenderer.invoke("browser:available"),
+    open: () => ipcRenderer.invoke("browser:open"),
+    navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
+    snapshot: () => ipcRenderer.invoke("browser:snapshot"),
+    click: (selector) => ipcRenderer.invoke("browser:click", selector),
+    type: (selector, text) => ipcRenderer.invoke("browser:type", selector, text),
+    close: () => ipcRenderer.invoke("browser:close"),
+  },
   ollama: {
     installOfficial: (platform) => ipcRenderer.invoke("ollama:installOfficial", platform),
     onInstallProgress: (handler) => {

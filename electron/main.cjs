@@ -230,6 +230,100 @@ function registerSecretHandlers() {
 }
 
 // ---------------------------------------------------------------------------
+// Browser booking agent: a visible second window the model drives.
+// No preload, no Node, its own cookie jar — a plain Chromium tab the user can
+// watch. Only http(s) may load; popups stay shut so the run can't wander.
+// ---------------------------------------------------------------------------
+let agentWindow = null;
+
+function agentSnapshotPayload(webContents) {
+  return webContents
+    .executeJavaScript(
+      `({ url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 4000) })`,
+    )
+    .then(
+      (s) => ({ url: String(s.url || ""), title: String(s.title || ""), text: String(s.text || "") }),
+      () => ({ url: "", title: "", text: "" }),
+    );
+}
+
+function ensureAgentWindow() {
+  if (agentWindow && !agentWindow.isDestroyed()) return agentWindow;
+  agentWindow = new BrowserWindow({
+    width: 1280,
+    height: 900,
+    title: "Rocky — booking agent",
+    autoHideMenuBar: true,
+    webPreferences: {
+      // Plain web page: deliberately no preload, no Node, sandboxed.
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      partition: "persist:rocky-agent",
+    },
+  });
+  agentWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  agentWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("http://") && !url.startsWith("https://")) event.preventDefault();
+  });
+  agentWindow.on("closed", () => {
+    agentWindow = null;
+  });
+  return agentWindow;
+}
+
+function registerBrowserHandlers() {
+  ipcMain.handle("browser:available", () => true);
+  ipcMain.handle("browser:open", () => {
+    const win = ensureAgentWindow();
+    win.show();
+    win.focus();
+  });
+  ipcMain.handle("browser:navigate", async (_event, url) => {
+    const target = String(url || "");
+    if (!target.startsWith("http://") && !target.startsWith("https://")) {
+      throw new Error("Agent navigates to http(s) pages only.");
+    }
+    const win = ensureAgentWindow();
+    win.show();
+    await win.loadURL(target);
+    return agentSnapshotPayload(win.webContents);
+  });
+  ipcMain.handle("browser:snapshot", () => {
+    if (!agentWindow || agentWindow.isDestroyed()) throw new Error("Agent window is not open.");
+    return agentSnapshotPayload(agentWindow.webContents);
+  });
+  ipcMain.handle("browser:click", async (_event, selector) => {
+    if (!agentWindow || agentWindow.isDestroyed()) throw new Error("Agent window is not open.");
+    const sel = String(selector || "").slice(0, 300);
+    const clicked = await agentWindow.webContents
+      .executeJavaScript(
+        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.scrollIntoView({ block: "center" }); el.click(); return true; })()`,
+      )
+      .catch(() => false);
+    if (!clicked) throw new Error("Nothing matched that element.");
+    await new Promise((r) => setTimeout(r, 1200));
+    return agentSnapshotPayload(agentWindow.webContents);
+  });
+  ipcMain.handle("browser:type", async (_event, selector, text) => {
+    if (!agentWindow || agentWindow.isDestroyed()) throw new Error("Agent window is not open.");
+    const sel = String(selector || "").slice(0, 300);
+    const value = String(text ?? "").slice(0, 500);
+    const typed = await agentWindow.webContents
+      .executeJavaScript(
+        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.focus(); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`,
+      )
+      .catch(() => false);
+    if (!typed) throw new Error("Nothing matched that field.");
+    return agentSnapshotPayload(agentWindow.webContents);
+  });
+  ipcMain.handle("browser:close", () => {
+    if (agentWindow && !agentWindow.isDestroyed()) agentWindow.close();
+    agentWindow = null;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Updates. The renderer drives this with a button, so nothing downloads on its
 // own — we only check when asked, then wait for a second explicit "download".
 //
@@ -434,6 +528,7 @@ function registerUpdates() {
 app.whenReady().then(async () => {
   registerAppProtocol();
   registerSecretHandlers();
+  registerBrowserHandlers();
   registerShell();
   registerUpdates();
   const session = require("electron").session.defaultSession;

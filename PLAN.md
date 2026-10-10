@@ -221,3 +221,9 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   with a GPT-5.4-pinned Test button, keychain allowlist, masks, export-strip and leak-wipe
   coverage) reserved for the computer-use runner; the planner, voice check and onboarding
   analysis read only `llm_key`. No migration needed — keys ride the profile `extra` column.
+- 2026-10-10: Browser booking agent foundations (restaurant-first): `browserAgent.ts`
+  (slot-filling, proposal copy, hold titles, search fallback, single-step GPT-5.4-mini worker
+  on `browser_key`, 7 tests) + desktop agent window (visible Chromium via Electron, no new
+  deps: open/navigate/snapshot/click/type over IPC) + planner tools `find_restaurant`,
+  `propose_booking` (calendar-checked hold), `book_appointment` (confirm-gated, deep-link
+  fallback without desktop). Multi-step drive loop + live booking test still open (Om).
