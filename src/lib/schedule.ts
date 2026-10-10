@@ -35,10 +35,13 @@ function statusOf(
   return "upcoming";
 }
 
+/** A block ending at midnight ("00:00") ends the day — render it as 24:00. */
+const endOfDay = (time: string) => (time === "00:00" ? "24:00" : time);
+
 /** scheduled_blocks row -> the shape the calendar components already render. */
 export function blockToEvent(row: ScheduledBlockRow, ctx: BuildContext): EventBlock {
   const startTime = trimTime(row.start_time);
-  const endTime = trimTime(row.end_time);
+  const endTime = endOfDay(trimTime(row.end_time));
   const isNew =
     Date.now() - new Date(row.created_at).getTime() < NEW_WINDOW_MINUTES * 60_000 &&
     !row.previous_start_time;
@@ -49,6 +52,7 @@ export function blockToEvent(row: ScheduledBlockRow, ctx: BuildContext): EventBl
     startTime,
     endTime,
     status: statusOf(row.date, startTime, endTime, ctx),
+    kind: row.source_type,
     tag: row.previous_start_time ? "moved" : isNew ? "new" : undefined,
     movedFrom: row.previous_start_time ? trimTime(row.previous_start_time) : undefined,
     note: (row as unknown as { notes?: string | null }).notes ?? undefined,
@@ -62,7 +66,7 @@ export function commitmentToEvent(
   ctx: BuildContext,
 ): EventBlock {
   const startTime = trimTime(row.start_time);
-  const endTime = trimTime(row.end_time);
+  const endTime = endOfDay(trimTime(row.end_time));
   const color = (row as unknown as { color?: string | null }).color as EventBlock["color"] | undefined;
   const note = (row as unknown as { notes?: string | null }).notes ?? undefined;
   return {
@@ -71,6 +75,7 @@ export function commitmentToEvent(
     startTime,
     endTime,
     status: statusOf(date, startTime, endTime, ctx),
+    kind: "fixed",
     color: color ?? undefined,
     note: note ?? undefined,
   };

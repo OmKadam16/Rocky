@@ -39,7 +39,7 @@ export default function WeekView({ week }: { week: WeekSummary }) {
         <div className="grid" style={{ gridTemplateColumns: GRID_COLUMNS, height: WEEK_AXIS_HEIGHT + 8 }}>
           <div className="relative">
             {HOUR_LABELS.map((label) => (
-              <div key={label} className="absolute left-0 font-mono text-label text-grey-faint" style={{ top: weekOffset(label) - 6 }}>
+              <div key={label} className="absolute left-0 font-mono text-label text-grey-faint" style={{ top: (label === "00:00" ? WEEK_AXIS_HEIGHT : weekOffset(label)) - 6 }}>
                 {label}
               </div>
             ))}

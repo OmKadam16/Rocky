@@ -4,8 +4,10 @@ export type EventBlock = {
   id: string;
   title: string;
   startTime: string; // "16:00"
-  endTime: string; // "17:00"
+  endTime: string; // "17:00", "24:00" when a block runs to midnight
   status: EventStatus;
+  /** Where the block came from: task work, a calendar event, or fixed. */
+  kind: "task" | "event" | "fixed";
   subtext?: string; // "3 people", "leave by 17:50, 22 min drive"
   tag?: "new" | "moved";
   movedFrom?: string; // "16:00" if tag === "moved"

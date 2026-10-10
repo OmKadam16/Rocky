@@ -39,13 +39,20 @@ export function useTheme() {
   }, []);
 
   const toggle = () => {
-    setTheme((t) => {
-      const next = t === "dark" ? "light" : "dark";
-      try {
-        window.dispatchEvent(new CustomEvent("vc-theme-change", { detail: next }));
-      } catch {}
-      return next;
-    });
+    // Read the live theme from the DOM, not React state, so the toggle can
+    // never get stuck on a stale value — and apply it synchronously so one
+    // click always flips the page, even if a re-render is delayed.
+    const current =
+      document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    const next = current === "dark" ? "light" : "dark";
+    try {
+      document.documentElement.setAttribute("data-theme", next);
+      document.body.setAttribute("data-theme", next);
+      document.documentElement.style.colorScheme = next;
+      localStorage.setItem("vc-theme", next);
+      window.dispatchEvent(new CustomEvent("vc-theme-change", { detail: next }));
+    } catch {}
+    setTheme(next);
   };
 
   return { theme, toggle };

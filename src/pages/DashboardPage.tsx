@@ -141,10 +141,10 @@ export default function DashboardPage({ day, now, assignments, assistantState = 
             <div className="font-mono text-micro tracking-tab uppercase text-grey-faint">Who you&apos;re seeing</div>
           </div>
           <div className="mt-3 flex flex-col">
-            {day.events.slice(0, 3).length === 0 ? (
+            {day.events.filter((e) => e.kind !== "task").slice(0, 3).length === 0 ? (
               <div className="font-mono text-meta text-grey">No people today</div>
             ) : (
-              day.events.slice(0, 3).map((e) => (
+              day.events.filter((e) => e.kind !== "task").slice(0, 3).map((e) => (
                 <div key={e.id} className="flex items-center gap-3 border-b border-line-strong/50 py-3">
                   <div className="flex h-[26px] w-[26px] items-center justify-center rounded-full bg-line-strong font-mono text-micro text-ink-soft">
                     {e.title.slice(0, 2).toUpperCase()}

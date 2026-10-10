@@ -2,8 +2,8 @@
 
 /** First hour rendered on the axis. */
 export const DAY_START_HOUR = 5;
-/** Last hour rendered on the axis. */
-export const DAY_END_HOUR = 23;
+/** Axis runs to midnight so late blocks (e.g. 23:59–24:00) stay in-grid. */
+export const DAY_END_HOUR = 24;
 
 /** Day view: 64px per hour, so a 15-min block and a 90-min block read differently. */
 export const DAY_PX_PER_HOUR = 64;
@@ -17,11 +17,14 @@ export const HOUR_COUNT = DAY_END_HOUR - DAY_START_HOUR;
 export const DAY_AXIS_HEIGHT = HOUR_COUNT * DAY_PX_PER_HOUR;
 export const WEEK_AXIS_HEIGHT = HOUR_COUNT * WEEK_PX_PER_HOUR;
 
-/** "05:00", "06:00", … "23:00" — one label per hour. */
-export const HOUR_LABELS = Array.from(
-  { length: HOUR_COUNT + 1 },
-  (_, i) => `${String(DAY_START_HOUR + i).padStart(2, "0")}:00`,
-);
+/** "05:00", "06:00", … "23:00", then midnight as "00:00". */
+export const HOUR_LABELS = [
+  ...Array.from(
+    { length: HOUR_COUNT },
+    (_, i) => `${String(DAY_START_HOUR + i).padStart(2, "0")}:00`,
+  ),
+  "00:00",
+];
 
 /** "16:30" -> 990 */
 export function toMinutes(time: string): number {

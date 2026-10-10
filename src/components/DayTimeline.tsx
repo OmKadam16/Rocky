@@ -34,14 +34,14 @@ export default function DayTimeline({ events, now }: Props) {
         }}
       />
 
-      {/* hour labels — one per hour */}
+      {/* hour labels — one per hour, midnight pinned to the axis bottom */}
       {HOUR_LABELS.map((label) => (
         <div
           key={label}
           className={`absolute left-0 font-mono text-label ${
             label === nowHour ? "text-ink" : "text-grey-faint"
           }`}
-          style={{ top: dayOffset(label) - 6 }}
+          style={{ top: (label === "00:00" ? DAY_AXIS_HEIGHT : dayOffset(label)) - 6 }}
         >
           {label}
         </div>
@@ -62,7 +62,7 @@ export default function DayTimeline({ events, now }: Props) {
           className="absolute left-[84px] right-[4px] text-center font-mono text-label tracking-gap text-grey-ghost"
           style={{ top: DAY_AXIS_HEIGHT + 10 }}
         >
-          nothing after {last.endTime}
+          nothing after {last.endTime === "24:00" ? "midnight" : last.endTime}
         </div>
       )}
 

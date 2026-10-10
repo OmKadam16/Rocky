@@ -50,7 +50,8 @@ export default function DayEventBlock({ event }: { event: EventBlock }) {
     <div
       className={`absolute left-[84px] right-[4px] box-border overflow-hidden ${surface(event)}`}
       style={{
-        top: dayOffset(event.startTime),
+        // Pre-dawn starts pin to the grid top instead of spilling above it.
+        top: Math.max(0, dayOffset(event.startTime)),
         height,
         padding: compact ? "0 12px" : roomy ? "7px 12px" : "3px 12px",
       }}
