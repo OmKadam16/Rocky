@@ -13,6 +13,12 @@
 export const PAIR_CODE_LEN = 6;
 export const PAIR_EXPIRY_MIN = 5;
 export const PAIR_EXPIRY_SEC = PAIR_EXPIRY_MIN * 60;
+/**
+ * Static codes live ~10 years: one QR per user that never changes.
+ * Far-future (not null) so the devices CHECK constraint and the
+ * claim_pair expiry guard keep working with no schema change.
+ */
+export const STATIC_PAIR_EXPIRY_YEARS = 10;
 /** Phone shows "laptop offline" when devices.last_seen is older than this. */
 export const LAPTOP_OFFLINE_AFTER_SEC = 45;
 /** Laptop presence heartbeat interval. */
@@ -89,6 +95,21 @@ export function isValidPairCode(input: string): boolean {
 /** Expiry timestamp for a fresh code (ms since epoch). */
 export function freshPairExpiry(now: number = Date.now()): number {
   return now + PAIR_EXPIRY_SEC * 1000;
+}
+
+/** Expiry for a static code (ms since epoch). */
+export function farFuturePairExpiry(now: number = Date.now()): number {
+  return now + STATIC_PAIR_EXPIRY_YEARS * 365 * 24 * 3600 * 1000;
+}
+
+/**
+ * Static-code rule: reuse the laptop row's existing code whenever it is a
+ * valid code, regardless of its expiry (publishing bumps the expiry to
+ * far-future). Generate only when the row has no usable code.
+ */
+export function shouldReusePairCode(pairCode: string | null | undefined): boolean {
+  if (!pairCode) return false;
+  return isValidPairCode(pairCode);
 }
 
 export function isPairExpired(expiresAtMs: number, now: number = Date.now()): boolean {

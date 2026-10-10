@@ -31,7 +31,8 @@ export const TABLES = {
     name: "profiles",
     mode: "per-user",
     columns: ["id", "email", "display_name", "ai_mode", "provider", "model", "voice", "about_text", "onboarding_done"],
-    localOnly: ["llm_key_enc", "el_key_enc"],
+    // API keys sync per user through `extra`: one key for all of a user's
+    // devices. RLS ("own rows only") scopes them to the account.
     readDefaults: { id: "local" },
   },
   preferences: {
@@ -57,7 +58,7 @@ export const TABLES = {
   },
 } as const satisfies Record<string, TableSpec>;
 
-/** Device-only values (API keys) live in localStorage, scoped per user. Phase 2 moves keys server-side. */
+/** Per-user API keys live in localStorage, scoped per user, and sync through the profile row. */
 const localKey = (uid: string, field: string) => `vc-local-${uid}-${field}`;
 function readLocal(uid: string, fields: readonly string[]): Row {
   const out: Row = {};

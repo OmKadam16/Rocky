@@ -112,6 +112,14 @@ describe("fresh project: all migrations in order", () => {
     expect(r[0].r.laptop_name).toBe("Laptop");
     await expect(as(db, BOB, (q) => q(`select public.claim_pair('ABCDEF')`))).rejects.toThrow();
   });
+
+  it("keeps static pair codes across claims (0003: no single-use clear)", async () => {
+    const r2 = (await as(db, ALICE, (q) => q(`select public.claim_pair('ABCDEF', 'Phone 2') as r`))) as { r: { laptop_name: string } }[];
+    expect(r2[0].r.laptop_name).toBe("Laptop");
+    expect(await as(db, ALICE, (q) => q("select pair_code from public.devices where role = 'laptop'"))).toEqual([
+      { pair_code: "ABCDEF" },
+    ]);
+  });
 });
 
 describe("live project: Rocky-Planner history, then 0001_rocky_schema.sql", () => {

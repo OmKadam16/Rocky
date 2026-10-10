@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { isSupabaseConfigured, supabase, uniqueChannel } from "../lib/supabase";
+import { setSecret } from "../lib/secrets";
 import {
   deviceOnline,
   formatSeenAgo,
@@ -11,38 +12,40 @@ import {
   type PairError,
 } from "../lib/devices";
 import {
-  PAIR_EXPIRY_SEC,
   buildPairUrl,
   defaultLaptopName,
-  formatCountdown,
+  farFuturePairExpiry,
   formatPairCode,
-  freshPairExpiry,
   generateSecurePairCode,
   resolvePairOrigin,
+  shouldReusePairCode,
 } from "../lib/pairing";
 import { detectPairClaim } from "../lib/pairClaim";
 
-type Status = "waiting" | "confirming" | "connected" | "expired" | "offline";
+type Status = "waiting" | "confirming" | "connected" | "offline";
+
+/** Taps on the code within this window reveal the hidden rotate panel. */
+const ROTATE_TAPS_NEEDED = 5;
+const ROTATE_TAPS_WINDOW_MS = 2000;
 
 const STATUS_COPY: Record<Status, { title: string; body: string }> = {
-  waiting: { title: "Waiting for your phone", body: "Scan this code with Rocky on your phone. It expires in 5 minutes." },
+  waiting: { title: "Waiting for your phone", body: "Scan this code with Rocky on your phone. This code is yours and doesn't change." },
   confirming: { title: "Phone found", body: "Finishing pairing…" },
   connected: { title: "You're connected", body: "Your phone is paired. Say something on your phone to test it." },
-  expired: { title: "This code expired", body: "Codes last 5 minutes so nobody else can use them. Make a new one." },
   offline: { title: "Can't reach the relay", body: "Check your connection and retry." },
 };
 
 /**
  * Laptop Profile → Devices section, in v1 visual language.
- * QR encodes <site>/remote?pair=CODE; claim detection via Realtime +
- * 2 s poll (laptop pair_code becomes null on claim).
+ * One static QR per user: the laptop row's code is reused forever and only
+ * changes via the hidden rotate panel. Claim detection via Realtime + 2 s
+ * poll (a fresh phone row after this code's creation).
  */
 export default function DevicesSection() {
-  const [code, setCode] = useState(() => generateSecurePairCode());
-  const [expiresAtMs, setExpiresAtMs] = useState(() => freshPairExpiry());
+  const [code, setCode] = useState("");
+  const [codeReady, setCodeReady] = useState(false);
   const [laptopName, setLaptopName] = useState(() => defaultLaptopName());
   const [status, setStatus] = useState<Status>("waiting");
-  const [secsLeft, setSecsLeft] = useState(PAIR_EXPIRY_SEC);
   const [copied, setCopied] = useState(false);
   const [phoneName, setPhoneName] = useState<string | null>(null);
   const [devices, setDevices] = useState<{ laptop: PairDeviceRow | null; phone: PairDeviceRow | null }>({
@@ -54,8 +57,14 @@ export default function DevicesSection() {
   const [unpairing, setUnpairing] = useState(false);
   const [unpairError, setUnpairError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [epoch, setEpoch] = useState(0);
+  const [showRotate, setShowRotate] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | "code" | "keys">(null);
+  const [rotateBusy, setRotateBusy] = useState(false);
+  const [rotateMsg, setRotateMsg] = useState<string | null>(null);
   const createdAt = useRef(Date.now());
   const timers = useRef<number[]>([]);
+  const taps = useRef<number[]>([]);
   const laptopNameRef = useRef(laptopName);
   laptopNameRef.current = laptopName;
 
@@ -63,7 +72,7 @@ export default function DevicesSection() {
     () => resolvePairOrigin(import.meta.env.VITE_PUBLIC_URL as string | undefined, window.location.origin),
     [],
   );
-  const pairUrl = useMemo(() => buildPairUrl(siteOrigin, code), [siteOrigin, code]);
+  const pairUrl = useMemo(() => (code ? buildPairUrl(siteOrigin, code) : ""), [siteOrigin, code]);
 
   const doPublish = useCallback(async (c: string, e: number) => {
     const res = await publishLaptopPairing(c, e, laptopNameRef.current);
@@ -71,48 +80,37 @@ export default function DevicesSection() {
     setPublished(res.ok);
   }, []);
 
-  const resetPair = useCallback(
-    (next?: { code: string; expiresAtMs: number }) => {
-      timers.current.forEach((t) => window.clearTimeout(t));
-      timers.current = [];
-      const c = next?.code ?? generateSecurePairCode();
-      const e = next?.expiresAtMs ?? freshPairExpiry();
-      createdAt.current = Date.now();
-      setCode(c);
-      setExpiresAtMs(e);
-      setSecsLeft(PAIR_EXPIRY_SEC);
-      setStatus("waiting");
-      setPhoneName(null);
-      setDevices({ laptop: null, phone: null });
-      setPublished(false);
-      setUnpairError(null);
-      setCopied(false);
-      setPublishError(null);
-      void doPublish(c, e);
-    },
-    [doPublish],
-  );
-
-  // Publish on mount.
+  // Load-or-create the static code on mount: reuse the row's code whenever
+  // usable, generating only once. Republishing refreshes last_seen and bumps
+  // legacy 5-minute expiries to far-future without changing the code.
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    void doPublish(code, expiresAtMs);
+    let alive = true;
+    void (async () => {
+      try {
+        const rows = await readPairDevices();
+        if (!alive) return;
+        setDevices(rows);
+        if (rows.laptop?.name) setLaptopName(rows.laptop.name);
+        const existing = rows.laptop?.pair_code ?? null;
+        const c = shouldReusePairCode(existing) ? existing!.toUpperCase() : generateSecurePairCode();
+        createdAt.current = Date.now();
+        setCode(c);
+        setCodeReady(true);
+        void doPublish(c, farFuturePairExpiry());
+      } catch {
+        if (alive) setCodeReady(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Countdown → expiry.
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const left = Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000));
-      setSecsLeft(left);
-      if (left <= 0) setStatus((s) => (s === "waiting" ? "expired" : s));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [expiresAtMs]);
-
   // Claim detection: Realtime on devices + 2 s poll, both via detectPairClaim.
   useEffect(() => {
-    if (!isSupabaseConfigured || publishError) return;
+    if (!isSupabaseConfigured || publishError || !codeReady || !code) return;
     const sb = supabase();
     let alive = true;
     let settled = false;
@@ -159,7 +157,7 @@ export default function DevicesSection() {
       if (pollId) window.clearInterval(pollId);
       void sb.removeChannel(channel);
     };
-  }, [code, published, publishError]);
+  }, [code, codeReady, published, publishError, epoch]);
 
   // Fresh "seen ago" labels without hitting the relay.
   useEffect(() => {
@@ -181,8 +179,16 @@ export default function DevicesSection() {
       return;
     }
     setUnpairing(false);
-    resetPair();
-  }, [resetPair]);
+    // The code stays the same — only the phone row goes away.
+    setPhoneName(null);
+    setStatus("waiting");
+    setEpoch((e) => e + 1);
+    try {
+      setDevices(await readPairDevices());
+    } catch {
+      /* poll refreshes */
+    }
+  }, []);
 
   const copyCode = useCallback(async () => {
     try {
@@ -193,6 +199,60 @@ export default function DevicesSection() {
       /* clipboard unavailable */
     }
   }, [code]);
+
+  const onCodeTap = useCallback(() => {
+    const now = Date.now();
+    taps.current = [...taps.current, now].filter((t) => now - t <= ROTATE_TAPS_WINDOW_MS);
+    if (taps.current.length >= ROTATE_TAPS_NEEDED) {
+      taps.current = [];
+      setRotateMsg(null);
+      setConfirmAction(null);
+      setShowRotate((v) => !v);
+    }
+  }, []);
+
+  const rotateCode = useCallback(async () => {
+    setRotateBusy(true);
+    setRotateMsg(null);
+    try {
+      const c = generateSecurePairCode();
+      createdAt.current = Date.now();
+      setCode(c);
+      setPhoneName(null);
+      setStatus("waiting");
+      setShowRotate(false);
+      setConfirmAction(null);
+      setEpoch((e) => e + 1);
+      await doPublish(c, farFuturePairExpiry());
+      setRotateMsg("Code rotated. Old QR screenshots stop working; paired phones stay paired.");
+    } catch (e) {
+      setRotateMsg(e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200));
+    } finally {
+      setRotateBusy(false);
+    }
+  }, [doPublish]);
+
+  const wipeKeys = useCallback(async () => {
+    setRotateBusy(true);
+    setRotateMsg(null);
+    let cloudError: string | null = null;
+    for (const name of ["llm_key", "el_key"] as const) {
+      try {
+        // Clears the device store AND syncs the null to the shared profile row.
+        await setSecret(name, null);
+      } catch (e) {
+        cloudError = e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160);
+      }
+    }
+    setRotateBusy(false);
+    setShowRotate(false);
+    setConfirmAction(null);
+    setRotateMsg(
+      cloudError
+        ? `Local keys cleared, but the cloud wipe failed: ${cloudError}`
+        : "Keys wiped on this device and in the cloud. Enter new keys in onboarding or Profile — and revoke the old ones at the provider dashboards.",
+    );
+  }, []);
 
   if (!isSupabaseConfigured) {
     return (
@@ -206,15 +266,13 @@ export default function DevicesSection() {
   }
 
   const meta = STATUS_COPY[status];
-  const ringFrac = secsLeft / PAIR_EXPIRY_SEC;
-  const ringColor = status === "expired" ? "var(--color-warm)" : ringFrac < 0.2 ? "var(--color-warm)" : "var(--color-accent)";
 
   return (
     <div className="flex flex-col gap-2">
       <div className="rounded-[3px] border border-line px-[18px] py-[15px]">
         <div className="flex items-baseline gap-[14px]">
           <div className="min-w-0 flex-1 text-[15px] text-ink">Connect your phone</div>
-          <div className="flex-none font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">{formatCountdown(secsLeft)}</div>
+          <div className="flex-none font-mono text-[10px] tracking-[0.14em] uppercase text-accent">Connected</div>
         </div>
         <div className="mt-[6px] font-mono text-[10.5px] leading-[1.5] text-grey-soft text-pretty">
           {meta.title} — {meta.body}
@@ -226,50 +284,34 @@ export default function DevicesSection() {
             </div>
             <button
               type="button"
-              onClick={() => (expiresAtMs > Date.now() ? void doPublish(code, expiresAtMs) : resetPair())}
+              onClick={() => code && void doPublish(code, farFuturePairExpiry())}
               className="mt-2 cursor-pointer rounded-[3px] border border-line-strong px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink"
             >
               Retry
             </button>
           </div>
+        ) : !codeReady || !code ? (
+          <div className="mt-3 font-mono text-[11px] text-grey">Preparing your code…</div>
         ) : (
           <>
             <div className="mt-3 flex justify-center rounded-[3px] bg-card p-4">
               <QRCodeSVG value={pairUrl} size={200} bgColor="#ffffff" fgColor="#000000" level="M" role="img" aria-label={`Pairing QR code for ${pairUrl}`} />
             </div>
             <div className="mt-3 flex items-center justify-center gap-3">
-              <span className="font-mono text-[22px] tracking-[0.08em]">{formatPairCode(code)}</span>
+              <button
+                type="button"
+                onClick={onCodeTap}
+                title="Pairing code"
+                className="cursor-pointer font-mono text-[22px] tracking-[0.08em]"
+              >
+                {formatPairCode(code)}
+              </button>
               <button
                 type="button"
                 onClick={() => void copyCode()}
                 className="cursor-pointer rounded-[3px] border border-line-strong px-2 py-1 font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:border-ink hover:text-ink"
               >
                 {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <div className="mt-2 flex items-center justify-center gap-3">
-              <div className="relative h-[28px] w-[28px]" title="Time left">
-                <svg width="28" height="28" viewBox="0 0 28 28" style={{ transform: "rotate(-90deg)" }}>
-                  <circle cx="14" cy="14" r="11" fill="none" stroke="var(--color-line)" strokeWidth="3" />
-                  <circle
-                    cx="14"
-                    cy="14"
-                    r="11"
-                    fill="none"
-                    stroke={ringColor}
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeDasharray="69.1"
-                    strokeDashoffset={69.1 * (1 - ringFrac)}
-                  />
-                </svg>
-              </div>
-              <button
-                type="button"
-                onClick={() => resetPair()}
-                className="cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink"
-              >
-                Generate new code
               </button>
             </div>
             <div className="mt-2 text-center font-mono text-[10.5px] text-grey-soft">
@@ -284,6 +326,78 @@ export default function DevicesSection() {
             {(status === "confirming" || status === "connected") && phoneName && (
               <div className="mt-2 text-center font-mono text-[11px] text-accent-deep">
                 {status === "connected" ? `Paired with ${phoneName}.` : `Found ${phoneName}…`}
+              </div>
+            )}
+            {showRotate && (
+              <div className="mt-3 rounded-[3px] border border-dashed border-line-strong bg-panel px-3 py-3">
+                <div className="font-mono text-micro tracking-tab uppercase text-grey-mid">Hidden rotate (leak response)</div>
+                {rotateMsg && <div className="mt-2 font-mono text-[11px] leading-[1.5] text-grey">{rotateMsg}</div>}
+                {confirmAction === null && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmAction("code")}
+                      className="cursor-pointer rounded-[3px] border border-line-strong px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink"
+                    >
+                      Rotate pairing code
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmAction("keys")}
+                      className="cursor-pointer rounded-[3px] border border-line-strong px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] uppercase text-warm hover:border-ink"
+                    >
+                      Wipe API keys everywhere
+                    </button>
+                  </div>
+                )}
+                {confirmAction === "code" && (
+                  <div className="mt-2">
+                    <p className="font-mono text-[11px] leading-[1.5] text-grey">
+                      Old QR screenshots stop working. Paired phones stay paired. Continue?
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void rotateCode()}
+                        disabled={rotateBusy}
+                        className="cursor-pointer rounded-[3px] bg-ink px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] uppercase text-canvas disabled:opacity-60"
+                      >
+                        {rotateBusy ? "Rotating…" : "Yes, rotate"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction(null)}
+                        className="cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {confirmAction === "keys" && (
+                  <div className="mt-2">
+                    <p className="font-mono text-[11px] leading-[1.5] text-grey">
+                      Clears keys on this device and in the cloud — all devices go keyless until new keys are entered. Also revoke them at the provider dashboards. Continue?
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void wipeKeys()}
+                        disabled={rotateBusy}
+                        className="cursor-pointer rounded-[3px] bg-ink px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] uppercase text-canvas disabled:opacity-60"
+                      >
+                        {rotateBusy ? "Wiping…" : "Yes, wipe keys"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction(null)}
+                        className="cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>

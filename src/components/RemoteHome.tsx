@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import OpenAI from "openai";
 import { useAssistant } from "../hooks/useAssistant";
 import { useSchedule } from "../hooks/useSchedule";
 import { ensureAudioUnlocked } from "../lib/speech";
-import { getSecret, setSecret } from "../lib/secrets";
-import { resolveModelId } from "../lib/models";
 import { supabase } from "../lib/supabase";
 import { todayISO } from "../lib/schedule";
 import {
@@ -13,7 +10,6 @@ import {
   updateLaptopName,
   useLaptopPresence,
 } from "../lib/devices";
-import { db } from "../lib/db";
 
 /**
  * Phone home (/remote when paired). Read-only today/week of the same
@@ -303,25 +299,12 @@ function SettingsSheet({
   const [phoneName, setPhoneName] = useState("Loading…");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [llmKey, setLlmKey] = useState("");
-  const [elKey, setElKey] = useState("");
-  const [hasKeys, setHasKeys] = useState<boolean | null>(null);
-  const [testing, setTesting] = useState<"llm" | "el" | null>(null);
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
     void readPhoneDevice()
       .then((row) => alive && setPhoneName(row?.name ?? "this phone"))
       .catch(() => alive && setPhoneName("this phone"));
-    void (async () => {
-      try {
-        const [a, b] = await Promise.all([getSecret("llm_key"), getSecret("el_key")]);
-        if (alive) setHasKeys(Boolean(a?.trim() && b?.trim()));
-      } catch {
-        if (alive) setHasKeys(false);
-      }
-    })();
     return () => {
       alive = false;
     };
@@ -361,46 +344,6 @@ function SettingsSheet({
     window.location.reload();
   };
 
-  const testKey = async (which: "llm" | "el") => {
-    setTesting(which);
-    setTestMsg(null);
-    try {
-      if (which === "llm") {
-        const key = llmKey.trim();
-        if (!key) throw new Error("Paste a key first.");
-        const stored = ((await db.profiles.get("local"))?.model ?? "").trim();
-        const client = new OpenAI({ apiKey: key, dangerouslyAllowBrowser: true });
-        await client.chat.completions.create({
-          model: stored ? resolveModelId(stored) : "gpt-4o",
-          messages: [{ role: "user", content: "hi" }],
-          max_tokens: 1,
-        });
-        setTestMsg({ ok: true, text: "Connected." });
-      } else {
-        const key = elKey.trim();
-        if (!key) throw new Error("Paste a key first.");
-        const resp = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": key } });
-        if (!resp.ok) throw new Error(`ElevenLabs rejected the key (${resp.status}).`);
-        setTestMsg({ ok: true, text: "Connected." });
-      }
-    } catch (e) {
-      setTestMsg({ ok: false, text: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) });
-    } finally {
-      setTesting(null);
-    }
-  };
-
-  const saveKeys = async () => {
-    if (llmKey.trim()) await setSecret("llm_key", llmKey.trim());
-    if (elKey.trim()) await setSecret("el_key", elKey.trim());
-    setLlmKey("");
-    setElKey("");
-    setHasKeys(true);
-    try {
-      window.dispatchEvent(new Event("vc-profile-update"));
-    } catch {}
-  };
-
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Settings">
       <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-ink/20" />
@@ -419,36 +362,7 @@ function SettingsSheet({
 
         <div className="font-mono text-[10.5px] text-grey-soft">This phone: {phoneName}</div>
 
-        {hasKeys === false && (
-          <div className="rounded-[3px] border border-line bg-card px-[15px] py-[13px]">
-            <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Keys on this phone</div>
-            <p className="mt-2 text-14 leading-[1.5] text-ink-muted">Add your keys on this phone in Settings. They stay on this phone.</p>
-            <div className="mt-3 flex flex-col gap-3">
-              <label className="flex flex-col gap-1">
-                <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">AI key</span>
-                <div className="flex items-center gap-2">
-                  <input type="password" value={llmKey} onChange={(e) => setLlmKey(e.target.value)} placeholder="Paste your API key" className="min-w-0 flex-1 rounded-[3px] border border-line-strong bg-panel px-2 py-1.5 font-mono text-12 outline-none focus:border-ink" />
-                  <button type="button" onClick={() => void testKey("llm")} disabled={testing !== null} className="flex-none cursor-pointer rounded-[3px] border border-line-strong px-2 py-1.5 font-mono text-micro uppercase text-grey-mid disabled:opacity-60">
-                    {testing === "llm" ? "…" : "Test"}
-                  </button>
-                </div>
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">ElevenLabs key</span>
-                <div className="flex items-center gap-2">
-                  <input type="password" value={elKey} onChange={(e) => setElKey(e.target.value)} placeholder="For voice" className="min-w-0 flex-1 rounded-[3px] border border-line-strong bg-panel px-2 py-1.5 font-mono text-12 outline-none focus:border-ink" />
-                  <button type="button" onClick={() => void testKey("el")} disabled={testing !== null} className="flex-none cursor-pointer rounded-[3px] border border-line-strong px-2 py-1.5 font-mono text-micro uppercase text-grey-mid disabled:opacity-60">
-                    {testing === "el" ? "…" : "Test"}
-                  </button>
-                </div>
-              </label>
-              {testMsg && <div className={`font-mono text-[11px] ${testMsg.ok ? "text-accent-deep" : "text-warm"}`}>{testMsg.text}</div>}
-              <button type="button" onClick={() => void saveKeys()} disabled={!llmKey.trim() && !elKey.trim()} className="cursor-pointer rounded-[3px] bg-ink px-4 py-2 text-13 font-medium text-canvas disabled:opacity-60">
-                Save keys on this phone
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="font-mono text-[10.5px] text-grey-soft">Talk uses your account’s keys — the same ones as your laptop.</div>
 
         {error && (
           <div role="alert" className="font-mono text-[11px] text-warm">

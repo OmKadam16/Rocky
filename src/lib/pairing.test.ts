@@ -8,9 +8,11 @@ import {
   generatePairCode,
   isPairExpired,
   isValidPairCode,
+  farFuturePairExpiry,
   normalizePairCode,
   parsePairParam,
   resolvePairOrigin,
+  shouldReusePairCode,
 } from "./pairing";
 
 describe("pairing codes (6 Crockford chars, stored without dash)", () => {
@@ -77,6 +79,22 @@ describe("QR payload (SPA rewrite)", () => {
     expect(extractPairFromQrText("k7p2qm")).toBe("K7P2QM");
     expect(extractPairFromQrText("hello world")).toBeNull();
     expect(extractPairFromQrText("")).toBeNull();
+  });
+});
+
+describe("static pair codes (one QR per user)", () => {
+  it("reuses any valid existing code, generates only when absent", () => {
+    expect(shouldReusePairCode("K7P2QM")).toBe(true);
+    expect(shouldReusePairCode("k7p-2qm")).toBe(true);
+    expect(shouldReusePairCode(null)).toBe(false);
+    expect(shouldReusePairCode("")).toBe(false);
+    expect(shouldReusePairCode("XY")).toBe(false);
+  });
+
+  it("sets far-future expiry (~10 years)", () => {
+    const now = 1_000_000;
+    const exp = farFuturePairExpiry(now);
+    expect(exp - now).toBeGreaterThan(9 * 365 * 24 * 3600 * 1000);
   });
 });
 

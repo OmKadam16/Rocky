@@ -49,10 +49,16 @@ Migrations in `supabase/migrations/`, tested by `supabase/tests/migrations.test.
   realtime publication.
 - `0002_devices_commands.sql`: `devices`, `commands`, `claim_pair` RPC (SECURITY DEFINER),
   `voice-clips` storage bucket.
+- `0003_claim_pair_static.sql`: `claim_pair` keeps the laptop row's code on success —
+  one static QR per user. Apply to the live project by hand (SQL editor).
 
 Rules:
 - Fixed commitments never move. Only flexible tasks/blocks get rescheduled.
-- API keys (`llm_key_enc`, `el_key_enc`) are `localOnly` in `supaDb.ts` and must never be sent to Supabase.
+- API keys (`llm_key_enc`, `el_key_enc`) sync per user through the profile row's `extra`
+  column (one key for all of a user's devices; RLS "own rows only" scopes them).
+  Claiming still needs the account's own session, so a leaked QR alone grants nothing.
+  Leak response: hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys
+  everywhere + revoke at the provider dashboards).
 - Any schema change = a new numbered migration + a test in `migrations.test.ts` + a note here.
 
 ## 4. Status
@@ -65,8 +71,9 @@ Rules:
       model with one-click download) → your day (text, voice or photos, analyzed into
       commitments) → commitments → dashboard. Resumes where you left off.
 - [x] Emails feature fully removed.
-- [x] Phone remote: laptop shows QR + 6-char code (XXX-XXX, 5 min expiry) in Profile → Devices;
-      phone opens `/remote`, signs in or pairs, sees the calendar, talks to Rocky.
+- [x] Phone remote: laptop shows one static QR + 6-char code (XXX-XXX) in Profile → Devices;
+      phone opens `/remote`, signs in or pairs, sees the calendar, talks to Rocky with the
+      account's shared keys (phone keys card removed).
 - [x] Memory page UI (`src/pages/MemoryPage.tsx`), model check/download via Ollama.
 - [x] Everything consolidated into `OmKadam16/Rocky` main. `tsc`, 42 tests and build pass.
 
@@ -164,3 +171,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Plan rewritten for the new repo `OmKadam16/Rocky`. Working copy moved to `C:\Rocky`.
 - 2026-10-10: Phase 1 code part done: pairing QR encodes `VITE_PUBLIC_URL` when set, else the page origin (`resolvePairOrigin`, tested; documented in `.env.example`). Render site creation, Supabase redirect URLs and the real-phone test are still open (Om).
 - 2026-10-10: Phones now land on the mobile UI (calendar + talk) on any path, not just `/remote` (`shouldShowMobileUi`, tested; verified at 390px with no overflow). Desktop browsers unchanged.
+- 2026-10-10: One key per user shared across devices (keys sync via profile `extra`, phone keys card removed); one static QR per user (`0003_claim_pair_static.sql`, no single-use clear, far-future expiry); hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys everywhere). Apply 0003 to the live project by hand.

@@ -9,10 +9,16 @@ describe("supaDb row mapping", () => {
     expect(row).toEqual({ user_id: UID, id: "t1", name: "Essay", status: "pending", extra: { parts: [{ n: 1 }] } });
   });
 
-  it("never sends API keys to the server", () => {
+  it("syncs API keys per user via extra (one key for all devices)", () => {
     const row = toDbRow(TABLES.profiles, { id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret" }, UID);
-    expect(JSON.stringify(row)).not.toContain("secret");
-    expect(row).toEqual({ user_id: UID, id: "local", display_name: "Om", extra: {} });
+    expect(row).toEqual({
+      user_id: UID,
+      id: "local",
+      display_name: "Om",
+      extra: { llm_key_enc: "sk-secret", el_key_enc: "el-secret" },
+    });
+    const back = fromDbRow(TABLES.profiles, { ...row, updated_at: "x" });
+    expect(back).toEqual({ id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret" });
   });
 
   it("ignores server-owned fields on write", () => {
