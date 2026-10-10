@@ -37,8 +37,8 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         : { dot: "var(--color-grey-faint)", label: "Connecting…" };
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col bg-canvas text-ink">
-      <header className="flex items-center gap-2 px-5 pt-4">
+    <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col bg-canvas text-ink">
+      <header className="flex flex-none items-center gap-2 px-5 pt-4">
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[10.5px] tracking-label uppercase text-grey-mid">
             {selected === today ? "Today" : selected}
@@ -59,7 +59,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         </button>
       </header>
 
-      <div className="px-5 pt-3">
+      <div className="flex-none px-5 pt-3">
         <div className="grid grid-cols-2 gap-1 rounded-[3px] border border-line bg-card p-1" role="group" aria-label="Calendar view">
           {(["day", "week"] as const).map((v) => (
             <button
@@ -77,7 +77,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         </div>
       </div>
 
-      <div className="px-5 pt-3">
+      <div className="flex-none px-5 pt-3">
         <div className="grid grid-cols-7 gap-1" role="group" aria-label="Week">
           {week.days.map((d) => {
             const isSel = d.date === selected;
@@ -102,7 +102,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 px-5 pb-44 pt-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-48 pt-4">
         {loading ? (
           <div className="font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
         ) : error ? (
@@ -207,11 +207,17 @@ function TalkDock({
   const lastReply = [...assistant.turns].reverse().find((t) => t.role === "assistant")?.text ?? null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-5">
-      <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center border-t border-line bg-canvas">
+      <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5 pb-5 pt-3">
         {assistant.error && (
           <div className="w-full rounded-[3px] border border-line bg-card px-3 py-2 font-mono text-meta leading-[1.5] text-grey">{assistant.error}</div>
         )}
+        {lastReply && assistant.state !== "thinking" && (
+          <div className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft">
+            {lastReply}
+          </div>
+        )}
+        {assistant.state === "thinking" && <div className="font-mono text-micro tracking-tab uppercase text-accent">Thinking…</div>}
         {assistant.state === "listening" && (
           <div className="flex items-end gap-[3px]" aria-label="Listening">
             {[0, 1, 2, 3, 4].map((i) => (
@@ -223,12 +229,6 @@ function TalkDock({
             ))}
           </div>
         )}
-        {lastReply && assistant.state !== "thinking" && (
-          <div className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft">
-            {lastReply}
-          </div>
-        )}
-        {assistant.state === "thinking" && <div className="font-mono text-micro tracking-tab uppercase text-accent">Thinking…</div>}
         <button
           type="button"
           onPointerDown={down}

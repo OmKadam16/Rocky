@@ -186,3 +186,6 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: QR removed entirely (scanner never worked on-device): pairing is code-only with
   static 8-char codes (`XXXX-XXXX`, `0004` accepts legacy 6-char rows); visible Rotate code
   disconnects the phone until it enters the new code; `qrcode.react`/`jsqr` deps removed.
+- 2026-10-10: Phone UI fixes from the on-device screenshot: talk dock is a solid bottom bar
+  (replies sit inside it, above the mic, instead of floating over events), mic level bars moved
+  directly above the mic button, calendar list scrolls in its own container (`h-dvh` layout).
