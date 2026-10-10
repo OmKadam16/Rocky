@@ -6,9 +6,8 @@ import ThemeToggle from "./ThemeToggle";
 import { useSchedule } from "../hooks/useSchedule";
 import { ensureAudioUnlocked } from "../lib/speech";
 import { supabase } from "../lib/supabase";
-import { isActive, todayISO } from "../lib/schedule";
-import { addDays, mondayOf, parseISODate, toISODate } from "../../shared/datetime";
-import { db } from "../lib/db";
+import { todayISO } from "../lib/schedule";
+import { addDays, longLabel, mondayOf, parseISODate, weekDates, WEEKDAY_SHORT } from "../../shared/datetime";
 import {
   readPhoneDevice,
   unpairPhone,
@@ -29,52 +28,33 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   const [selected, setSelected] = useState(today);
   const [view, setView] = useState<"day" | "week">("day");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Visible month ("YYYY-MM") for the scrollable month picker. Follows the
-  // selected day; month arrows move it without changing the selection.
-  const [monthCursor, setMonthCursor] = useState(() => today.slice(0, 7));
   const { day, week, now, loading, error, refresh } = useSchedule(selected);
 
+  // One-week row, swipeable across weeks: 26 weeks back and forward, each a
+  // snap page. Same cells as before — swipe right for next week, left for
+  // the previous one.
+  const stripWeeks = useMemo(() => {
+    const start = mondayOf(addDays(today, -7 * STRIP_WEEKS_BACK));
+    return Array.from({ length: STRIP_WEEKS_BACK + 1 + STRIP_WEEKS_FWD }, (_, i) =>
+      weekDates(addDays(start, i * 7)),
+    );
+  }, [today]);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const selectedWeekIdx = stripWeeks.findIndex((w) => w.includes(selected));
+
+  // Start on this week; follow the selection when a tapped day sits in an
+  // adjacent week.
   useEffect(() => {
-    const m = selected.slice(0, 7);
-    setMonthCursor((c) => (c === m ? c : m));
-  }, [selected]);
-
-  const monthWeeks = useMemo(() => monthWeekRows(monthCursor), [monthCursor]);
-
-  // Dates in the visible month that hold something (blocks or active fixed
-  // commitments), for the dots under each day.
-  const [busyDates, setBusyDates] = useState<Set<string>>(() => new Set());
+    const el = stripRef.current;
+    if (!el) return;
+    el.scrollLeft = STRIP_WEEKS_BACK * el.clientWidth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
-    let alive = true;
-    const first = monthWeeks[0][0];
-    const last = monthWeeks[monthWeeks.length - 1][6];
-    void (async () => {
-      try {
-        const [blocks, commitments] = await Promise.all([
-          db.scheduled_blocks.where("date").between(first, last, true, true).toArray(),
-          db.fixed_commitments.toArray(),
-        ]);
-        if (!alive) return;
-        const busy = new Set(blocks.map((b) => b.date));
-        for (let d = first; d <= last; d = addDays(d, 1)) {
-          const weekday = parseISODate(d).getDay();
-          if (commitments.some((c) => c.days_of_week.includes(weekday) && isActive(d, c))) busy.add(d);
-        }
-        setBusyDates(busy);
-      } catch {
-        /* keep previous dots */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [monthWeeks]);
-
-  const shiftMonth = (delta: number) => {
-    const [y, m] = monthCursor.split("-").map(Number);
-    const d = new Date(y, m - 1 + delta, 1);
-    setMonthCursor(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  };
+    const el = stripRef.current;
+    if (!el || selectedWeekIdx < 0) return;
+    el.scrollTo({ left: selectedWeekIdx * el.clientWidth, behavior: "smooth" });
+  }, [selectedWeekIdx]);
   const presence = useLaptopPresence(true);
   const assistant = useAssistant(() => void refresh());
 
@@ -136,15 +116,47 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         </div>
       </div>
 
-      <MonthStrip
-        cursor={monthCursor}
-        weeks={monthWeeks}
-        selected={selected}
-        today={today}
-        busyDates={busyDates}
-        onSelect={setSelected}
-        onShiftMonth={shiftMonth}
-      />
+      <div className="flex-none px-5 pt-3">
+        <div
+          ref={stripRef}
+          className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label="Weeks — swipe left or right for more weeks"
+        >
+          {stripWeeks.map((days) => (
+            <div key={days[0]} className="grid w-full flex-none snap-start grid-cols-7 gap-1">
+              {days.map((date) => {
+                const d = parseISODate(date);
+                const isSel = date === selected;
+                const isToday = date === today;
+                return (
+                  <button
+                    key={date}
+                    type="button"
+                    onClick={() => setSelected(date)}
+                    aria-label={`${longLabel(date)}${isToday ? ", today" : ""}`}
+                    aria-pressed={isSel}
+                    className={`relative flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
+                      isSel ? "border-ink text-canvas" : "border-line bg-card text-ink hover:border-line-strong"
+                    }`}
+                  >
+                    {isSel && (
+                      <motion.span
+                        layoutId="phone-day"
+                        className="absolute inset-0 rounded-[3px] bg-ink"
+                        transition={{ duration: 0.22, ease: EASE }}
+                      />
+                    )}
+                    <span className="relative font-mono text-micro uppercase">{WEEKDAY_SHORT[d.getDay()]}</span>
+                    <span className="relative text-15 font-medium">{d.getDate()}</span>
+                    {!isSel && isToday && <span className="relative h-1 w-1 rounded-full bg-accent" aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto px-5 pb-48 pt-4 [-webkit-overflow-scrolling:touch]">
         {loading ? (
@@ -224,154 +236,9 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   );
 }
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const STRIP_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-/** Monday-first week rows covering the whole cursor month (1–30/31). */
-function monthWeekRows(cursor: string): string[][] {
-  const [y, m] = cursor.split("-").map(Number);
-  const lastDate = toISODate(new Date(y, m, 0));
-  const weeks: string[][] = [];
-  let start = mondayOf(`${cursor}-01`);
-  for (let w = 0; w < 6; w += 1) {
-    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
-    if (addDays(start, 6) >= lastDate) break;
-    start = addDays(start, 7);
-  }
-  return weeks;
-}
-
-/**
- * Scrollable full-month day picker: Mon–Sun week rows from the 1st to the
- * 30th/31st. About three weeks visible; scroll for the rest. Tapping any day
- * selects it (the month follows across boundaries via the cursor effect).
- * Selection pill reuses the shared layoutId so it glides like the old strip.
- */
-function MonthStrip({
-  cursor,
-  weeks,
-  selected,
-  today,
-  busyDates,
-  onSelect,
-  onShiftMonth,
-}: {
-  cursor: string;
-  weeks: string[][];
-  selected: string;
-  today: string;
-  busyDates: Set<string>;
-  onSelect: (date: string) => void;
-  onShiftMonth: (delta: number) => void;
-}) {
-  const [y, m] = cursor.split("-").map(Number);
-  const label = `${MONTH_NAMES[m - 1]} ${y}`;
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Keep the selected week in view; a month with no selection scrolls to top.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const idx = weeks.findIndex((w) => w.includes(selected));
-    if (idx < 0) {
-      el.scrollTop = 0;
-      return;
-    }
-    el.querySelector(`[data-week="${idx}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [weeks, selected]);
-
-  return (
-    <div className="flex-none px-5 pt-3">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-micro tracking-tab uppercase text-grey-mid">{label}</div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onShiftMonth(-1)}
-            aria-label="Previous month"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[3px] border border-line bg-card font-mono text-13 text-grey-mid hover:border-line-strong hover:text-ink"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelect(today)}
-            aria-label="Go to today"
-            className="h-8 cursor-pointer rounded-[3px] border border-line bg-card px-2.5 font-mono text-micro tracking-tab uppercase text-grey-mid hover:border-line-strong hover:text-ink"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => onShiftMonth(1)}
-            aria-label="Next month"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[3px] border border-line bg-card font-mono text-13 text-grey-mid hover:border-line-strong hover:text-ink"
-          >
-            ›
-          </button>
-        </div>
-      </div>
-      <div className="mt-2 grid grid-cols-7 gap-1" aria-hidden>
-        {STRIP_WEEKDAYS.map((w) => (
-          <div key={w} className="pb-1 text-center font-mono text-micro uppercase text-grey-faint">
-            {w}
-          </div>
-        ))}
-      </div>
-      <div ref={scrollRef} className="max-h-[176px] touch-pan-y overscroll-contain overflow-y-auto" role="group" aria-label={`Days of ${label}`}>
-        <div className="flex flex-col gap-1 pb-1">
-          {weeks.map((days, i) => (
-            <div key={days[0]} data-week={i} className="grid grid-cols-7 gap-1">
-              {days.map((date) => {
-                const isSel = date === selected;
-                const isToday = date === today;
-                const inMonth = date.slice(0, 7) === cursor;
-                const dayNum = Number(date.slice(8, 10));
-                const busy = busyDates.has(date);
-                return (
-                  <button
-                    key={date}
-                    type="button"
-                    onClick={() => onSelect(date)}
-                    aria-label={`${label} ${dayNum}${isToday ? ", today" : ""}${inMonth ? "" : ", adjacent month"}`}
-                    aria-pressed={isSel}
-                    className={`relative flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
-                      isSel
-                        ? "border-ink text-canvas"
-                        : inMonth
-                          ? "border-line bg-card text-ink hover:border-line-strong"
-                          : "border-line bg-card text-grey-faint hover:border-line-strong"
-                    }`}
-                  >
-                    {isSel && (
-                      <motion.span
-                        layoutId="phone-day"
-                        className="absolute inset-0 rounded-[3px] bg-ink"
-                        transition={{ duration: 0.22, ease: EASE }}
-                      />
-                    )}
-                    <span className="relative text-15 font-medium">{dayNum}</span>
-                    <span className="relative flex h-1 items-center" aria-hidden>
-                      {!isSel && isToday ? (
-                        <span className="h-1 w-1 rounded-full bg-accent" />
-                      ) : !isSel && busy ? (
-                        <span className="h-1 w-1 rounded-full bg-grey-faint" />
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+/** Weeks rendered each side of this week in the swipeable strip. */
+const STRIP_WEEKS_BACK = 26;
+const STRIP_WEEKS_FWD = 26;
 
 function TalkDock({
   assistant,
