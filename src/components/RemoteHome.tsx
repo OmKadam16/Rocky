@@ -263,6 +263,20 @@ function TalkDock({
   const lastReply = lastAssistant?.text ?? null;
   const [replyGone, setReplyGone] = useState(false);
 
+  // Same confirm gate as the laptop panel: the planner asks
+  // "say yes or tap Confirm" before destructive tools run.
+  const needsConfirm = Boolean(
+    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && assistant.state === "idle",
+  );
+  const confirm = () => {
+    if (!needsConfirm) return;
+    void assistant.send("yes");
+  };
+  const cancel = () => {
+    if (!needsConfirm) return;
+    void assistant.send("cancel");
+  };
+
   // A new reply always shows; once the turn is over it clears after 2 s so
   // only the calendar remains. Errors never auto-hide.
   useEffect(() => {
@@ -306,24 +320,68 @@ function TalkDock({
             ))}
           </div>
         )}
-        <motion.button
-          type="button"
-          onClick={tap}
-          aria-label={assistant.state === "listening" ? "Tap to finish and send" : "Tap to talk to Rocky"}
-          whileTap={{ scale: 0.92 }}
-          transition={{ duration: 0.15, ease: EASE }}
-          className={`grid h-[72px] w-[72px] cursor-pointer select-none place-items-center rounded-full text-canvas transition-colors ${
-            assistant.state === "listening" ? "bg-accent" : "bg-ink hover:bg-accent"
-          }`}
-        >
-          <span className="flex items-center gap-[3px]" aria-hidden>
-            {[16, 22, 14, 20].map((h, i) => (
-              <span key={i} className="w-[3px] rounded-[2px] bg-canvas" style={{ height: h }} />
-            ))}
-          </span>
-        </motion.button>
+        <div className="flex items-center gap-5">
+          <AnimatePresence initial={false}>
+            {needsConfirm && (
+              <motion.button
+                key="cancel"
+                type="button"
+                onClick={cancel}
+                aria-label="Cancel — don't do it"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.6 }}
+                transition={{ duration: 0.2, ease: EASE }}
+                whileTap={{ scale: 0.9 }}
+                className="grid h-12 w-12 cursor-pointer select-none place-items-center rounded-full border border-line-strong text-[18px] text-warm hover:border-ink"
+              >
+                <span aria-hidden>✕</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+          <motion.button
+            type="button"
+            onClick={tap}
+            aria-label={assistant.state === "listening" ? "Tap to finish and send" : "Tap to talk to Rocky"}
+            whileTap={{ scale: 0.92 }}
+            transition={{ duration: 0.15, ease: EASE }}
+            className={`grid h-[72px] w-[72px] cursor-pointer select-none place-items-center rounded-full text-canvas transition-colors ${
+              assistant.state === "listening" ? "bg-accent" : "bg-ink hover:bg-accent"
+            }`}
+          >
+            <span className="flex items-center gap-[3px]" aria-hidden>
+              {[16, 22, 14, 20].map((h, i) => (
+                <span key={i} className="w-[3px] rounded-[2px] bg-canvas" style={{ height: h }} />
+              ))}
+            </span>
+          </motion.button>
+          <AnimatePresence initial={false}>
+            {needsConfirm && (
+              <motion.button
+                key="confirm"
+                type="button"
+                onClick={confirm}
+                aria-label="Confirm — yes, do it"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.6 }}
+                transition={{ duration: 0.2, ease: EASE }}
+                whileTap={{ scale: 0.9 }}
+                className="grid h-12 w-12 cursor-pointer select-none place-items-center rounded-full bg-ink text-[18px] text-canvas hover:bg-accent"
+              >
+                <span aria-hidden>✓</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
         <div className="font-mono text-micro tracking-tab uppercase text-grey">
-          {assistant.state === "listening" ? "Tap to finish" : offline ? "Tap to talk · laptop offline" : "Tap to talk"}
+          {needsConfirm
+            ? "Tap ✓ to confirm · ✕ to cancel"
+            : assistant.state === "listening"
+              ? "Tap to finish"
+              : offline
+                ? "Tap to talk · laptop offline"
+                : "Tap to talk"}
         </div>
         <div className="flex w-full items-center gap-2">
           <input
