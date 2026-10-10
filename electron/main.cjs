@@ -182,7 +182,7 @@ function configurePermissions(session) {
 const secretsFile = () => path.join(app.getPath("userData"), "secrets.json");
 
 /** The only names the renderer may read or write. */
-const SECRET_NAMES = new Set(["llm_key", "el_key"]);
+const SECRET_NAMES = new Set(["llm_key", "el_key", "browser_key"]);
 
 function readSecrets() {
   try {

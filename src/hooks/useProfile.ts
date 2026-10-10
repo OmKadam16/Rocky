@@ -17,10 +17,13 @@ type ProfileData = {
     memory_model_ready: boolean | null;
     llm_key_mask: string;
     el_key_mask: string;
+    browser_key_mask: string;
     has_llm_key: boolean;
     has_el_key: boolean;
+    has_browser_key: boolean;
     llm_key_needs_reentry: boolean;
     el_key_needs_reentry: boolean;
+    browser_key_needs_reentry: boolean;
   };
   preferences: {
     earliest_start_time: string;
@@ -50,7 +53,7 @@ export function useProfile(_token: string | null) {
       const pref = await db.preferences.get(1);
       if (!p) { setData(null); return; }
       // Keys may live in the OS keychain on desktop, so never read the row directly.
-      const [llmKey, elKey] = await Promise.all([getSecret("llm_key"), getSecret("el_key")]);
+      const [llmKey, elKey, browserKey] = await Promise.all([getSecret("llm_key"), getSecret("el_key"), getSecret("browser_key")]);
       setData({
         profile: {
           user_id: p.id,
@@ -66,10 +69,13 @@ export function useProfile(_token: string | null) {
           memory_model_ready: (p as unknown as { memory_model_ready?: boolean | null }).memory_model_ready ?? null,
           llm_key_mask: mask(llmKey),
           el_key_mask: mask(elKey),
+          browser_key_mask: mask(browserKey),
           has_llm_key: !!llmKey,
           has_el_key: !!elKey,
+          has_browser_key: !!browserKey,
           llm_key_needs_reentry: false,
           el_key_needs_reentry: false,
+          browser_key_needs_reentry: false,
         },
         preferences: {
           earliest_start_time: (pref?.earliest_start_time as string)?.slice(0, 5) ?? "07:00",
@@ -108,6 +114,7 @@ export function useProfile(_token: string | null) {
     // setSecret writes to the keychain on desktop, Dexie in the browser.
     if (patch.llm_key) await setSecret("llm_key", String(patch.llm_key));
     if (patch.el_key) await setSecret("el_key", String(patch.el_key));
+    if (patch.browser_key) await setSecret("browser_key", String(patch.browser_key));
     if (patch.earliest_start_time || patch.latest_end_time || patch.buffer_minutes_after_fixed_events !== undefined || patch.preferred_study_hours !== undefined) {
       const pref = (await db.preferences.get(1)) ?? ({ id: 1 } as any);
       if (patch.earliest_start_time) pref.earliest_start_time = patch.earliest_start_time as string;

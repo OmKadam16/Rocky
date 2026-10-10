@@ -97,7 +97,9 @@ runtime, so nothing above it changes.
 
 **Keys** move out of Dexie into the Keychain the first time the desktop app reads them
 (`src/lib/secrets.ts`). Read every key through `getSecret` — reading `profile.llm_key_enc`
-directly will come back empty on desktop after that migration.
+directly will come back empty on desktop after that migration. There are three keys:
+planner (`llm_key`, every AI turn), browser worker (`browser_key`, GPT-5.4 computer use
+only — the planner never touches it), and voice (`el_key`, ElevenLabs only).
 
 The build is **unsigned**. On another Mac, Gatekeeper will block it until the user
 right-clicks the app and chooses Open. Signing needs an Apple Developer certificate.

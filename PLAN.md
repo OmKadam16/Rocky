@@ -56,8 +56,10 @@ Migrations in `supabase/migrations/`, tested by `supabase/tests/migrations.test.
 
 Rules:
 - Fixed commitments never move. Only flexible tasks/blocks get rescheduled.
-- API keys (`llm_key_enc`, `el_key_enc`) sync per user through the profile row's `extra`
-  column (one key for all of a user's devices; RLS "own rows only" scopes them).
+- API keys (`llm_key_enc`, `el_key_enc`, `browser_key_enc`) sync per user through the
+  profile row's `extra` column (one key for all of a user's devices; RLS "own rows only"
+  scopes them). `llm_key` drives the planner, `browser_key` is reserved for the GPT-5.4
+  computer-use runner (the planner never reads it), `el_key` is ElevenLabs only.
   Claiming still needs the account's own session, so a leaked code alone grants nothing.
   Leak response: hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys
   everywhere + revoke at the provider dashboards).
@@ -215,3 +217,7 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: OpenAI model list refreshed: added `gpt-5-mini`/`gpt-5-nano` (cheap daily
   turns) + `gpt-5.4-mini`/`gpt-5.4` (native computer use for browser-agent work), all
   `tested:false` until tool-call verification. Planner default stays `gpt-4o`.
+- 2026-10-10: Two LLM keys, routed and separated: new `browser_key` (own Profile section
+  with a GPT-5.4-pinned Test button, keychain allowlist, masks, export-strip and leak-wipe
+  coverage) reserved for the computer-use runner; the planner, voice check and onboarding
+  analysis read only `llm_key`. No migration needed — keys ride the profile `extra` column.

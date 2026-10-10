@@ -57,6 +57,8 @@ export default function ProfilePage() {
   });
   const [llmKey, setLlmKey] = useState("");
   const [llmKeyShown, setLlmKeyShown] = useState(false);
+  const [browserKey, setBrowserKey] = useState("");
+  const [browserKeyShown, setBrowserKeyShown] = useState(false);
   const [elKey, setElKey] = useState("");
   const [elKeyShown, setElKeyShown] = useState(false);
   const [voice, setVoice] = useState(() => getLS("vc-voice", DEFAULT_VOICE_ID));
@@ -74,6 +76,8 @@ export default function ProfilePage() {
   const [checkStages, setCheckStages] = useState<VoiceCheckStage[] | null>(null);
   const [llmTest, setLlmTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [llmTesting, setLlmTesting] = useState(false);
+  const [browserTest, setBrowserTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [browserTesting, setBrowserTesting] = useState(false);
   const [elTest, setElTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [elTesting, setElTesting] = useState(false);
   const [ollamaInfo, setOllamaInfo] = useState("");
@@ -168,8 +172,8 @@ export default function ProfilePage() {
             <button onClick={async () => {
               // Secrets must never reach the export file: it lands in Downloads,
               // where it is world-readable and usually cloud-synced.
-              const { llm_key_enc, el_key_enc, ...profile } = ((await db.profiles.get("local")) ?? {}) as Record<string, unknown>;
-              void llm_key_enc; void el_key_enc;
+              const { llm_key_enc, el_key_enc, browser_key_enc, ...profile } = ((await db.profiles.get("local")) ?? {}) as Record<string, unknown>;
+              void llm_key_enc; void el_key_enc; void browser_key_enc;
               const all = {
                 profile,
                 preferences: await db.preferences.get(1),
@@ -278,8 +282,36 @@ export default function ProfilePage() {
                       )}
                     </div>
                   </label>
+                  <label className="flex flex-col gap-[10px]">
+                    <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Browser key</span>
+                    <span className="font-mono text-[10.5px] text-grey-soft">Separate OpenAI key for browser work (GPT-5.4 computer use). Planner turns never touch it.</span>
+                    <div className="flex items-center gap-3 border-b border-line-strong pb-[9px]">
+                      <input type={browserKeyShown ? "text" : "password"} value={browserKey} onChange={(e) => { setBrowserKey(e.target.value); setBrowserTest(null); }} placeholder="Paste your browser key" className="min-w-0 flex-1 border-0 bg-transparent font-mono text-[14px] text-ink outline-none" />
+                      <button onClick={() => setBrowserKeyShown((v) => !v)} className="flex-none cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">{browserKeyShown ? "Hide" : "Show"}</button>
+                    </div>
+                    <span className="font-mono text-[10.5px] text-grey-soft">{data?.profile.has_browser_key ? data.profile.browser_key_mask : "Not set"} — device only, never sent to Supabase</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setBrowserTesting(true);
+                          setBrowserTest(null);
+                          const r = await testLlmKey("OpenAI", "gpt-5.4", browserKey);
+                          setBrowserTesting(false);
+                          setBrowserTest(r);
+                        }}
+                        disabled={browserTesting || !browserKey.trim()}
+                        className="w-fit cursor-pointer rounded-[3px] border border-line-strong px-4 py-2 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink disabled:opacity-60"
+                      >
+                        {browserTesting ? "Testing…" : "Test browser key"}
+                      </button>
+                      {browserTest && <span className={`font-mono text-[11px] ${browserTest.ok ? "text-accent-deep" : "text-warm"}`}>{browserTest.message}</span>}
+                      {browserTest?.ok && !data?.profile.has_browser_key && (
+                        <span className="font-mono text-[11px] text-warm">Tested OK — press Save below to keep it.</span>
+                      )}
+                    </div>
+                  </label>
                   <div className="flex items-center gap-4">
-                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} if (await saveProfile({ provider, model, llm_key: llmKey || undefined })) { setLlmKey(""); setOpenSection(null); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
+                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} if (await saveProfile({ provider, model, llm_key: llmKey || undefined, browser_key: browserKey || undefined })) { setLlmKey(""); setBrowserKey(""); setOpenSection(null); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
                     <button onClick={() => setOpenSection(null)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
                     {saveError && <span className="font-mono text-[11px] text-warm">{saveError}</span>}
                   </div>

@@ -10,15 +10,15 @@ describe("supaDb row mapping", () => {
   });
 
   it("syncs API keys per user via extra (one key for all devices)", () => {
-    const row = toDbRow(TABLES.profiles, { id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret" }, UID);
+    const row = toDbRow(TABLES.profiles, { id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret", browser_key_enc: "sk-browser" }, UID);
     expect(row).toEqual({
       user_id: UID,
       id: "local",
       display_name: "Om",
-      extra: { llm_key_enc: "sk-secret", el_key_enc: "el-secret" },
+      extra: { llm_key_enc: "sk-secret", el_key_enc: "el-secret", browser_key_enc: "sk-browser" },
     });
     const back = fromDbRow(TABLES.profiles, { ...row, updated_at: "x" });
-    expect(back).toEqual({ id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret" });
+    expect(back).toEqual({ id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret", browser_key_enc: "sk-browser" });
   });
 
   it("ignores server-owned fields on write", () => {

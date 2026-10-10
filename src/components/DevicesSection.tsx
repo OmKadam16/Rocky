@@ -234,7 +234,7 @@ export default function DevicesSection() {
     setRotateBusy(true);
     setRotateMsg(null);
     let cloudError: string | null = null;
-    for (const name of ["llm_key", "el_key"] as const) {
+    for (const name of ["llm_key", "el_key", "browser_key"] as const) {
       try {
         // Clears the device store AND syncs the null to the shared profile row.
         await setSecret(name, null);

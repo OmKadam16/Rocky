@@ -3,9 +3,16 @@ import { db } from "./db";
 /**
  * API keys. On desktop they live in the macOS Keychain via Electron's
  * safeStorage; in the browser they stay in Dexie, as before.
+ *
+ * Routing contract (two LLM keys, one voice key):
+ * - `llm_key`: the planner — every voice/text turn, day analysis, voice check.
+ * - `browser_key`: the browser worker — GPT-5.4 computer-use turns run by the
+ *   future booking runner. Nothing reads it yet except the key test; the
+ *   planner never touches it, so demo turns can't burn browser budget.
+ * - `el_key`: ElevenLabs speech-to-text / text-to-speech only.
  */
 
-type SecretName = "llm_key" | "el_key";
+type SecretName = "llm_key" | "el_key" | "browser_key";
 
 type RockyBridge = {
   isDesktop: boolean;
@@ -23,9 +30,10 @@ const bridge = (): RockyBridge | null =>
 export const isDesktop = () => Boolean(bridge()?.isDesktop);
 
 /** Dexie column backing each secret, used in the browser and for migration. */
-const DEXIE_FIELD: Record<SecretName, "llm_key_enc" | "el_key_enc"> = {
+const DEXIE_FIELD: Record<SecretName, "llm_key_enc" | "el_key_enc" | "browser_key_enc"> = {
   llm_key: "llm_key_enc",
   el_key: "el_key_enc",
+  browser_key: "browser_key_enc",
 };
 
 export async function getSecret(name: SecretName): Promise<string | null> {

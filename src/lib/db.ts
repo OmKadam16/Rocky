@@ -18,6 +18,8 @@ export interface ProfileRow {
   memory_model_ready?: boolean | null;
   llm_key_enc: string | null;
   el_key_enc: string | null;
+  /** Second LLM key for the browser worker (GPT-5.4); rides `extra` on Supabase, no migration. */
+  browser_key_enc: string | null;
   email: string | null;
 }
 
@@ -114,6 +116,7 @@ export async function ensureSeed() {
       onboarding_done: false,
       llm_key_enc: null,
       el_key_enc: null,
+      browser_key_enc: null,
       email: null,
     });
   }
