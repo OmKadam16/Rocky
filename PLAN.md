@@ -191,3 +191,7 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   directly above the mic button, calendar list scrolls in its own container (`h-dvh` layout).
 - 2026-10-10: Phone reply clears 2 s after the turn goes idle (errors stay); calendar
   scroller gets mobile touch treatment (`touch-pan-y`, contained overscroll, momentum).
+- 2026-10-10: UI polish (motion lib): `ExpandableCard` accordion for Profile Model/Voice
+  (single expanding card, chevron, one-open-at-a-time), spring bottom sheet + theme pill +
+  swipe-down in phone Settings, sliding tab pills, mic press + reply transitions, pair-flow
+  step transitions, safe-area padding, shared motion tokens + reduced-motion support.

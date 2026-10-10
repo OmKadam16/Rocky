@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useAssistant } from "../hooks/useAssistant";
+import { useTheme } from "../hooks/useTheme";
+import ThemeToggle from "./ThemeToggle";
 import { useSchedule } from "../hooks/useSchedule";
 import { ensureAudioUnlocked } from "../lib/speech";
 import { supabase } from "../lib/supabase";
@@ -10,6 +13,8 @@ import {
   updateLaptopName,
   useLaptopPresence,
 } from "../lib/devices";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 /**
  * Phone home (/remote when paired). Read-only today/week of the same
@@ -67,11 +72,18 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
               type="button"
               onClick={() => setView(v)}
               aria-pressed={view === v}
-              className={`h-9 cursor-pointer rounded-[3px] font-mono text-micro tracking-tab uppercase ${
-                view === v ? "bg-ink text-canvas" : "text-grey-mid hover:text-ink"
+              className={`relative h-9 cursor-pointer rounded-[3px] font-mono text-micro tracking-tab uppercase ${
+                view === v ? "text-canvas" : "text-grey-mid hover:text-ink"
               }`}
             >
-              {v}
+              {view === v && (
+                <motion.span
+                  layoutId="phone-view-tab"
+                  className="absolute inset-0 rounded-[3px] bg-ink"
+                  transition={{ duration: 0.22, ease: EASE }}
+                />
+              )}
+              <span className="relative">{v}</span>
             </button>
           ))}
         </div>
@@ -89,13 +101,20 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
                 onClick={() => setSelected(d.date)}
                 aria-label={`${d.longLabel}${isToday ? ", today" : ""}`}
                 aria-pressed={isSel}
-                className={`flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
-                  isSel ? "border-ink bg-ink text-canvas" : "border-line bg-card text-ink hover:border-line-strong"
+                className={`relative flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
+                  isSel ? "border-ink text-canvas" : "border-line bg-card text-ink hover:border-line-strong"
                 }`}
               >
-                <span className="font-mono text-micro uppercase">{d.weekdayShort}</span>
-                <span className="text-15 font-medium">{d.dayOfMonth}</span>
-                {!isSel && isToday && <span className="h-1 w-1 rounded-full bg-accent" aria-hidden />}
+                {isSel && (
+                  <motion.span
+                    layoutId="phone-day"
+                    className="absolute inset-0 rounded-[3px] bg-ink"
+                    transition={{ duration: 0.22, ease: EASE }}
+                  />
+                )}
+                <span className="relative font-mono text-micro uppercase">{d.weekdayShort}</span>
+                <span className="relative text-15 font-medium">{d.dayOfMonth}</span>
+                {!isSel && isToday && <span className="relative h-1 w-1 rounded-full bg-accent" aria-hidden />}
               </button>
             );
           })}
@@ -167,13 +186,15 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
 
       <TalkDock assistant={assistant} offline={presence.status === "offline"} now={now} />
 
-      {settingsOpen && (
-        <SettingsSheet
-          laptopName={presence.laptopName}
-          onClose={() => setSettingsOpen(false)}
-          onUnpaired={onUnpaired}
-        />
-      )}
+      <AnimatePresence>
+        {settingsOpen && (
+          <SettingsSheet
+            laptopName={presence.laptopName}
+            onClose={() => setSettingsOpen(false)}
+            onUnpaired={onUnpaired}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -221,15 +242,24 @@ function TalkDock({
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center border-t border-line bg-canvas">
-      <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5 pb-5 pt-3">
+      <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3">
         {assistant.error && (
           <div className="w-full rounded-[3px] border border-line bg-card px-3 py-2 font-mono text-meta leading-[1.5] text-grey">{assistant.error}</div>
         )}
-        {lastReply && !replyGone && assistant.state !== "thinking" && (
-          <div className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft">
-            {lastReply}
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {lastReply && !replyGone && assistant.state !== "thinking" && (
+            <motion.div
+              key={lastAssistant?.id ?? "reply"}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.22, ease: EASE }}
+              className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft"
+            >
+              {lastReply}
+            </motion.div>
+          )}
+        </AnimatePresence>
         {assistant.state === "thinking" && <div className="font-mono text-micro tracking-tab uppercase text-accent">Thinking…</div>}
         {assistant.state === "listening" && (
           <div className="flex items-end gap-[3px]" aria-label="Listening">
@@ -242,7 +272,7 @@ function TalkDock({
             ))}
           </div>
         )}
-        <button
+        <motion.button
           type="button"
           onPointerDown={down}
           onPointerUp={up}
@@ -250,6 +280,8 @@ function TalkDock({
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={assistant.state === "listening" ? "Release to send" : "Hold to talk to Rocky"}
+          whileTap={{ scale: 0.92 }}
+          transition={{ duration: 0.15, ease: EASE }}
           className={`grid h-[72px] w-[72px] cursor-pointer touch-none select-none place-items-center rounded-full text-canvas transition-colors ${
             assistant.state === "listening" ? "bg-accent" : "bg-ink hover:bg-accent"
           }`}
@@ -259,7 +291,7 @@ function TalkDock({
               <span key={i} className="w-[3px] rounded-[2px] bg-canvas" style={{ height: h }} />
             ))}
           </span>
-        </button>
+        </motion.button>
         <div className="font-mono text-micro tracking-tab uppercase text-grey">
           {assistant.state === "listening" ? "Release to send" : offline ? "Hold to talk · laptop offline" : "Hold to talk"}
         </div>
@@ -357,19 +389,51 @@ function SettingsSheet({
     window.location.reload();
   };
 
+  const { theme, toggle: toggleTheme } = useTheme();
+
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Settings">
-      <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-ink/20" />
-      <div className="relative flex max-h-[82vh] w-full max-w-[480px] flex-col gap-4 overflow-y-auto rounded-t-[4px] border border-line-strong bg-panel p-5 pb-8">
-        <div className="font-mono text-micro tracking-tab uppercase text-grey-mid">Settings</div>
+      <motion.button
+        type="button"
+        aria-label="Close settings"
+        onClick={onClose}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2, ease: EASE }}
+        className="absolute inset-0 bg-ink/20"
+      />
+      <motion.div
+        initial={{ y: 48 }}
+        animate={{ y: 0 }}
+        exit={{ y: 48, opacity: 0.5 }}
+        transition={{ type: "spring", stiffness: 320, damping: 32 }}
+        drag="y"
+        dragConstraints={{ top: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 120) onClose();
+        }}
+        className="relative flex max-h-[82vh] w-full max-w-[480px] flex-col gap-4 overflow-y-auto rounded-t-[4px] border border-line-strong bg-panel p-5 pb-[calc(2rem+env(safe-area-inset-bottom))]"
+      >
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-micro tracking-tab uppercase text-grey-mid">Settings</div>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
 
         <label className="flex flex-col gap-[9px]">
           <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">Laptop name</span>
           <div className="flex items-center gap-2">
             <input value={name} onChange={(e) => setName(e.target.value.slice(0, 40))} className="min-w-0 flex-1 rounded-[3px] border border-line-strong bg-card px-3 py-2 text-15 text-ink outline-none focus:border-ink" />
-            <button type="button" onClick={() => void saveName()} disabled={busy} className="flex-none cursor-pointer rounded-[3px] bg-ink px-4 py-2 text-13 font-medium text-canvas disabled:opacity-60">
+            <motion.button
+              type="button"
+              onClick={() => void saveName()}
+              disabled={busy}
+              whileTap={{ scale: 0.98 }}
+              className="flex-none cursor-pointer rounded-[3px] bg-ink px-4 py-2 text-13 font-medium text-canvas disabled:opacity-60"
+            >
               Save
-            </button>
+            </motion.button>
           </div>
         </label>
 
@@ -386,15 +450,21 @@ function SettingsSheet({
           <button type="button" onClick={onClose} className="cursor-pointer rounded-[3px] border border-line-strong px-4 py-2.5 font-mono text-micro tracking-tab uppercase text-grey hover:border-ink hover:text-ink">
             Close
           </button>
-          <button type="button" onClick={() => void unpair()} disabled={busy} className="cursor-pointer rounded-[3px] border border-line-strong px-4 py-2.5 font-mono text-micro tracking-tab uppercase text-warm hover:border-ink disabled:opacity-60">
+          <motion.button
+            type="button"
+            onClick={() => void unpair()}
+            disabled={busy}
+            whileTap={{ scale: 0.98 }}
+            className="cursor-pointer rounded-[3px] border border-line-strong px-4 py-2.5 font-mono text-micro tracking-tab uppercase text-warm hover:border-ink disabled:opacity-60"
+          >
             {busy ? "Unpairing…" : "Unpair"}
-          </button>
+          </motion.button>
         </div>
         <button type="button" onClick={() => void signOut()} className="cursor-pointer rounded-[3px] border border-line-strong px-4 py-2.5 font-mono text-micro tracking-tab uppercase text-grey hover:border-ink hover:text-ink">
           Sign out
         </button>
         <p className="text-center font-mono text-micro text-grey-faint">Signing out keeps the pairing.</p>
-      </div>
+      </motion.div>
     </div>
   );
 }

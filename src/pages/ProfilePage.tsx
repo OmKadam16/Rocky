@@ -3,6 +3,7 @@ import { db } from "../lib/db";
 import { useAuth } from "../hooks/useAuth";
 import { useProfile } from "../hooks/useProfile";
 import UpdateCard from "../components/UpdateCard";
+import ExpandableCard from "../components/ExpandableCard";
 import { DEFAULT_VOICE_ID, listVoices, type ElevenVoice } from "../lib/speech";
 import {
   DEFAULT_MODEL,
@@ -59,8 +60,7 @@ export default function ProfilePage() {
   const [elKey, setElKey] = useState("");
   const [elKeyShown, setElKeyShown] = useState(false);
   const [voice, setVoice] = useState(() => getLS("vc-voice", DEFAULT_VOICE_ID));
-  const [llmOpen, setLlmOpen] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [openSection, setOpenSection] = useState<"model" | "voice" | null>(null);
   const [voices, setVoices] = useState<ElevenVoice[]>([]);
   const [voicesError, setVoicesError] = useState("");
   const [voicesLoading, setVoicesLoading] = useState(false);
@@ -202,15 +202,12 @@ export default function ProfilePage() {
 
           {aiMode !== "manual" ? (
             <div className="mt-5 flex flex-col gap-[10px]">
-              <div className="flex items-center gap-5 rounded-[3px] border border-line bg-card px-[19px] py-[17px]">
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Model</div>
-                  <div className="mt-2 text-[16px] font-medium">{profModel}</div>
-                </div>
-                <button onClick={() => { setLlmOpen((v) => !v); setVoiceOpen(false); }} className="flex-none cursor-pointer rounded-[3px] border border-line-strong px-[14px] py-2 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink">Change</button>
-              </div>
-              {llmOpen && (
-                <div className="flex flex-col gap-[22px] rounded-[3px] border border-line-strong bg-done p-[22px] animate-vcin">
+              <ExpandableCard
+                title="Model"
+                value={profModel}
+                open={openSection === "model"}
+                onToggle={() => setOpenSection((s) => (s === "model" ? null : "model"))}
+              >
                   <div className="flex gap-[18px]">
                     <label className="flex flex-1 flex-col gap-[10px]">
                       <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Provider</span>
@@ -272,40 +269,34 @@ export default function ProfilePage() {
                     </div>
                   </label>
                   <div className="flex items-center gap-4">
-                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} if (await saveProfile({ provider, model, llm_key: llmKey || undefined })) { setLlmKey(""); setLlmOpen(false); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
-                    <button onClick={() => setLlmOpen(false)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
+                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} if (await saveProfile({ provider, model, llm_key: llmKey || undefined })) { setLlmKey(""); setOpenSection(null); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
+                    <button onClick={() => setOpenSection(null)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
                     {saveError && <span className="font-mono text-[11px] text-warm">{saveError}</span>}
                   </div>
-                </div>
-              )}
+              </ExpandableCard>
 
-              <div className="flex items-center gap-5 rounded-[3px] border border-line bg-card px-[19px] py-[17px]">
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Voice</div>
-                  <div className="mt-2 flex items-baseline gap-3">
+              <ExpandableCard
+                title="Voice"
+                value={
+                  <>
                     <span className="text-[16px] font-medium">{profVoice}</span>
-                    <span className="font-mono text-[11px] text-grey-mid">ElevenLabs · {elKeyMask}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    const next = !voiceOpen;
-                    setVoiceOpen(next);
-                    setLlmOpen(false);
-                    if (next && !voices.length && !voicesLoading) {
-                      setVoicesLoading(true);
-                      setVoicesError("");
-                      listVoices()
-                        .then(setVoices)
-                        .catch((e) => setVoicesError(e instanceof Error ? e.message : String(e)))
-                        .finally(() => setVoicesLoading(false));
-                    }
-                  }}
-                  className="flex-none cursor-pointer rounded-[3px] border border-line-strong px-[14px] py-2 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink"
-                >Change</button>
-              </div>
-              {voiceOpen && (
-                <div className="flex flex-col gap-[22px] rounded-[3px] border border-line-strong bg-done p-[22px] animate-vcin">
+                    <span className="ml-3 font-mono text-[11px] text-grey-mid">ElevenLabs · {elKeyMask}</span>
+                  </>
+                }
+                open={openSection === "voice"}
+                onToggle={() => {
+                  const opening = openSection !== "voice";
+                  setOpenSection(opening ? "voice" : null);
+                  if (opening && !voices.length && !voicesLoading) {
+                    setVoicesLoading(true);
+                    setVoicesError("");
+                    listVoices()
+                      .then(setVoices)
+                      .catch((e) => setVoicesError(e instanceof Error ? e.message : String(e)))
+                      .finally(() => setVoicesLoading(false));
+                  }
+                }}
+              >
                   <label className="flex flex-col gap-[10px]">
                     <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">ElevenLabs key</span>
                     <div className="flex items-center gap-3 border-b border-line-strong pb-[9px]">
@@ -405,12 +396,11 @@ export default function ProfilePage() {
                     )}
                   </div>
                   <div className="flex items-center gap-4">
-                    <button onClick={async () => { try { localStorage.setItem("vc-silence-ms", silenceMs); } catch {} if (await saveProfile({ voice, el_key: elKey || undefined })) { setElKey(""); setVoiceOpen(false); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
-                    <button onClick={() => setVoiceOpen(false)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
+                    <button onClick={async () => { try { localStorage.setItem("vc-silence-ms", silenceMs); } catch {} if (await saveProfile({ voice, el_key: elKey || undefined })) { setElKey(""); setOpenSection(null); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
+                    <button onClick={() => setOpenSection(null)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
                     {saveError && <span className="font-mono text-[11px] text-warm">{saveError}</span>}
                   </div>
-                </div>
-              )}
+              </ExpandableCard>
               <div className="rounded-[3px] border border-line bg-card px-[19px] py-[17px]">
                 <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Memory model (optional)</div>
                 <div className="mt-2 text-[15px] font-medium text-ink-soft">

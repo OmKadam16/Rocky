@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   buzz,
   defaultPhoneName,
@@ -16,6 +17,8 @@ import {
 import { currentUserId } from "../lib/supabase";
 
 const PAIR_STORE_KEY = "vc-remote-pair";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 function loadStoredPair(): string | null {
   try {
@@ -170,6 +173,15 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
         )}
       </div>
 
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={state}
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -12 }}
+          transition={{ duration: 0.2, ease: EASE }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
       {state === "intro" && (
         <div className="flex flex-1 flex-col gap-5 pt-10">
           <div>
@@ -288,6 +300,8 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
           </div>
         </div>
       )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

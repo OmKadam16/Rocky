@@ -100,6 +100,38 @@
   --animate-vcbreathe: vcbreathe 3.6s ease-in-out infinite;
   --animate-vcpulse: vcpulse 2.4s ease-in-out infinite;
   --animate-vcin: vcin 0.4s ease both;
+
+  /* shared motion language (expand/collapse, sheets, hovers) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 150ms;
+  --dur-med: 250ms;
+  --dur-slow: 350ms;
+}
+
+/* Shared card: one container for summary + editor, so expanding a section
+   reads as continuation, not a new card popping in. */
+.card {
+  border-radius: 6px;
+  border: 1px solid var(--color-line);
+  background: var(--color-card);
+  transition:
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+}
+.card-hover:hover {
+  border-color: var(--color-ink);
+  box-shadow: 0 8px 24px -18px rgba(23, 25, 26, 0.45);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 @keyframes vcbar {
