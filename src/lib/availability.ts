@@ -31,6 +31,17 @@ const toMinutes = (hhmm: string): number => {
   return h * 60 + (m || 0);
 };
 
+/**
+ * Words that promote the request to top priority: the new item is placed
+ * first at the requested time and everything movable shifts around it.
+ */
+const URGENT_WORDS =
+  /\b(?:urgent(?:ly)?|important(?:ly)?|critical(?:ly)?|asap|a\.s\.a\.p\.?|emergency|emergencies|priority|priorit(?:y|ise|ize)|must(?:-do)?|right\s+away|immediately|top\s+priority)\b/i;
+
+export function detectUrgency(text: string): boolean {
+  return URGENT_WORDS.test(text ?? "");
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 const fmt = (mins: number) => `${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`;
 
@@ -51,6 +62,14 @@ function resolveTime(hour: number, minute: number, meridiem: string | null): num
   // One through eleven stays ambiguous, and ambiguous means we say nothing.
   if (hour >= 12) return hour * 60 + minute;
   return null;
+}
+
+/** Which part of the day the text names, or null. Tonight counts as evening. */
+export function partOfDayIn(text: string): "morning" | "afternoon" | "evening" | "night" | null {
+  const m = /\b(morning|afternoon|evening|night|tonight)\b/i.exec(text ?? "");
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  return w === "tonight" ? "evening" : (w as "morning" | "afternoon" | "evening" | "night");
 }
 
 /** Which day the user meant, or null if they never said. */
@@ -94,8 +113,28 @@ export function parseRequestedWindow(
     // "8-10pm": the meridiem on the end applies to the start too.
     const startMer = mer1 ?? mer2 ?? null;
     const endMer = mer2 ?? mer1 ?? null;
-    const start = resolveTime(Number(h1), Number(m1 ?? 0), startMer);
+    let start = resolveTime(Number(h1), Number(m1 ?? 0), startMer);
     let end = resolveTime(Number(h2), Number(m2 ?? 0), endMer);
+    // Bare ranges like "4:30 to 6:30" carry no am/pm. A named part of day
+    // decides the half: "morning 7" is 07:00, "evening 7" is 19:00.
+    // Otherwise spoken times in the 1-11 band almost always mean
+    // afternoon/evening, so infer pm rather than giving up. With an explicit
+    // meridiem this branch never runs.
+    if ((start === null || end === null) && !startMer && !endMer) {
+      const anchor = partOfDayIn(text);
+      const bare = (h: number, m: string | undefined) => {
+        const hh = Number(h);
+        if (hh < 1 || hh > 11) return null;
+        const off = anchor === "morning" ? 0 : 12;
+        return (hh + off) * 60 + Number(m ?? 0);
+      };
+      const ps = bare(Number(h1), m1);
+      const pe = bare(Number(h2), m2);
+      if (ps !== null && pe !== null && pe > ps && pe <= 24 * 60) {
+        start = ps;
+        end = pe;
+      }
+    }
     if (start === null || end === null) return null;
     // "8pm to 1" — the end rolled past noon into the next meridiem.
     if (end <= start && endMer && endMer.toLowerCase().startsWith("a")) return null;
@@ -114,6 +153,29 @@ export function parseRequestedWindow(
   if (single24) {
     const start = Number(single24[1]) * 60 + Number(single24[2]);
     return { date, start: fmt(start), end: null };
+  }
+
+  // Bare single like "math problems 4:30" — infer pm (16:30), or am when
+  // the text names the morning ("yoga at 7 in the morning" → 07:00).
+  const bareSingle = /\b(?:at\s+)?([1-9]|1[0-1]):([0-5]\d)\b/i.exec(text);
+  if (bareSingle) {
+    const off = partOfDayIn(text) === "morning" ? 0 : 12;
+    const start = (Number(bareSingle[1]) + off) * 60 + Number(bareSingle[2]);
+    if (start < 24 * 60) return { date, start: fmt(start), end: null };
+  }
+
+  // Bare hour carried by a part of day, no colon: "yoga at 7 in the morning"
+  // → 07:00, "party at 7 in the evening" → 19:00.
+  const anchorHour =
+    /\b(morning|afternoon|evening|night|tonight)\b[^.\n]{0,24}?\b([1-9]|1[0-1])\b|\b([1-9]|1[0-1])\s*(?:o'?clock\s+)?in\s+the\s+(morning|afternoon|evening|night)\b/i.exec(
+      text,
+    );
+  if (anchorHour) {
+    const anchorWord = (anchorHour[1] ?? anchorHour[4] ?? "").toLowerCase();
+    const hour = Number(anchorHour[2] ?? anchorHour[3]);
+    const off = anchorWord === "morning" ? 0 : 12;
+    const start = (hour + off) * 60;
+    if (start < 24 * 60) return { date, start: fmt(start), end: null };
   }
 
   return null;
@@ -150,7 +212,7 @@ export function describeFree(date: string, days: DayWindows[]): string {
 const MOVE_VERB = /\b(?:move|shift|reschedul\w*|push|bump|change)\b/i;
 const FROM_RANGE = /\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:-|–|—|\bto\b)/i;
 /** Any time-of-day expression, to spot a message naming more than one. */
-const ANY_TIME = /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|\b(?:1[2-9]|2[0-3]):[0-5]\d\b/gi;
+const ANY_TIME = /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|\b(?:1[2-9]|2[0-3]):[0-5]\d\b|\b(?:[1-9]|1[0-1]):[0-5]\d\b/gi;
 
 /**
  * The window the user named, but only when it is safe to hold the model to it.

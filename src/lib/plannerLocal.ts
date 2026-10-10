@@ -5,7 +5,7 @@ import { PROVIDER_BASE_URL, normalizeProvider, resolveModelId } from "./models";
 import { getSecret } from "./secrets";
 import { SYSTEM_PROMPT } from "./plannerPrompt";
 import { MUTATING_TOOLS, contextSnapshot, runTool, toolSchemas } from "./plannerTools";
-import { describeFree, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
+import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
 import type { AssistantTurn } from "../types";
 
 const MAX_TOOL_ROUNDS = 8;
@@ -143,6 +143,16 @@ export async function askPlannerLocal(
     // Only from the current message: an hour mentioned a turn ago is context,
     // not an instruction about the booking being made now.
     const explicit = explicitWindow(message, snapshot);
+    // Urgency carries over one turn: "this is important" often arrives just
+    // before the day/time ("change it to today"), so read both together.
+    const urgent = detectUrgency(`${message} ${previousUserText}`);
+    if (urgent) {
+      messages.push({
+        role: "system",
+        content:
+          "The user marked this request urgent or important. Place it first at the requested time (or the earliest fitting slot via find_open_slot), then let conflict resolution move lower-priority blocks around it — that is expected, not a problem. Name everything that moved in your reply. Fixed commitments (immutable:true) still never move.",
+      });
+    }
     let corrections = 0;
 
     // One corrective round each: a wrongly-refused turn should not use up the
@@ -193,8 +203,8 @@ export async function askPlannerLocal(
                 : "") +
               "Every day in week.days carries a free_windows list — and today_schedule.free_windows repeats today's — giving exactly when the user is free. " +
               "A time inside one of those windows is bookable, and a commitment that ends before that time does not clash with it: " +
-              "a lab finishing at 17:50 has no bearing on an eight o'clock meeting. " +
-              "Check it, or call find_open_slot or reschedule_block and let the result decide. Only a tool result can justify refusing.",
+              "a lab finishing at 17:50 has no bearing on an eight o'clock meeting. Only entries with immutable:true are fixed; anything without that flag can be moved. " +
+              "Check it, or call find_open_slot or reschedule_block and let the result decide. If you still refuse, name the exact entry (title and hours on that date) whose hours overlap the requested hours — a refusal without that is not credible. Only a tool result can justify refusing.",
           });
           continue;
         }
@@ -250,7 +260,7 @@ export async function askPlannerLocal(
 
         let result: unknown;
         try {
-          result = await runTool(call.function.name, args, { openai, model });
+          result = await runTool(call.function.name, args, { openai, model, urgent });
         } catch (error) {
           result = { error: error instanceof Error ? error.message : String(error) };
         }

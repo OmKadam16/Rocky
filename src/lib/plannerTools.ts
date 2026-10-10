@@ -18,6 +18,7 @@ import {
   loadPreferences,
   loadTasks,
   resolveConflicts,
+  suggestMiddleSlot,
 } from "./scheduling";
 import type { FixedCommitmentRow, PreferencesRow, ScheduledBlockRow, TaskRow } from "../../shared/db";
 import {
@@ -113,7 +114,7 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
     function: {
       name: "place_sequence",
       description:
-        "Place two or more back-to-back items on one day — 'a study session and then dinner', 'gym, shower and breakfast before class'. Works out the window, checks everything fits, and leaves a gap between each. Use this whenever the user asks for more than one thing in a single request; adding them one at a time overlaps them.",
+        "Place two or more back-to-back items on one day — 'a study session and then dinner', 'gym, shower and breakfast before class'. Works out the window, checks everything fits, and leaves a gap between each. Only for items meant to run back-to-back in one run; items spread across the day (morning yoga, evening dinner) get separate add_one_off_event calls instead.",
       parameters: {
         type: "object",
         properties: {
@@ -170,6 +171,26 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
           },
         },
         required: ["date", "order"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "suggest_middle_slot",
+      description:
+        "Pick a sensible time inside part of a day when the user won't give an exact time ('morning', 'before 10'). Centers the block in the window, snaps to :00/:30, nudges to the nearest free stretch — never over a fixed commitment. Pass the activity title so a fallback length can be assumed (returned as duration_assumed — always state it aloud). Then book the returned slot with add_one_off_event.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "YYYY-MM-DD" },
+          title: { type: "string", description: "Activity title, used for the fallback length" },
+          anchor: { type: "string", enum: ["morning", "afternoon", "evening", "night"] },
+          earliest: { type: "string", description: "Narrow the window from below, HH:MM ('before 10' → latest 10:00)" },
+          latest: { type: "string", description: "Narrow the window from above, HH:MM" },
+          duration_minutes: { type: "integer", description: "Exact length when known; omit to assume from the title" },
+        },
+        required: ["date", "title"],
       },
     },
   },
@@ -242,12 +263,14 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
     function: {
       name: "delete_block",
       description:
-        "Delete a scheduled event or task block. Destructive — only call after the user explicitly confirmed (\"yes\" / Confirm), passing confirmed: true. First ask \"Delete <title> <day>? Say yes or tap Confirm\" with no tool call. Never deletes fixed commitments.",
+        "Delete a scheduled event or task block. If block_query plus date/start_time/end_time match exactly one block, it deletes immediately (fast path, no confirmed needed). Otherwise it returns needs_confirmation — then ask \"Delete <title> <day>? Say yes or tap Confirm\" with no further tool call until the user says yes, then call again with confirmed: true. Never deletes fixed commitments.",
       parameters: {
         type: "object",
         properties: {
           block_query: { type: "string" },
           date: { type: "string", description: "Optional YYYY-MM-DD to disambiguate" },
+          start_time: { type: "string", description: "Optional HH:MM hint for the block to delete, e.g. 16:30" },
+          end_time: { type: "string", description: "Optional HH:MM hint for the block to delete, e.g. 18:30" },
           confirmed: { type: "boolean", description: "True only after the user said yes on a later turn" },
         },
         required: ["block_query"],
@@ -258,11 +281,15 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "reschedule_block",
-      description: "Move an existing event or task block to a new date and time.",
+      description:
+        "Move an existing event or task block to a new date and time. Pass date/start_time/end_time when the user named the block's current time (e.g. math 4:30-6:30) to disambiguate which one to move.",
       parameters: {
         type: "object",
         properties: {
           block_query: { type: "string" },
+          date: { type: "string", description: "Optional YYYY-MM-DD of the block as it stands now" },
+          start_time: { type: "string", description: "Optional HH:MM of the block as it stands now" },
+          end_time: { type: "string", description: "Optional HH:MM of the block as it stands now" },
           new_date: { type: "string", description: "YYYY-MM-DD" },
           new_start_time: { type: "string", description: "HH:MM" },
           new_end_time: { type: "string", description: "HH:MM" },
@@ -350,16 +377,54 @@ export const toolSchemas: ChatCompletionTool[] = ALL_TOOL_SCHEMAS.filter(
 
 type Args = Record<string, any>;
 
-/** The model client, so note summarisation can reuse the user's key. */
-export type ToolContext = { openai: OpenAI; model: string };
+/** The model client, so note summarisation can reuse the user's key. Urgent turns displace rather than defer. */
+export type ToolContext = { openai: OpenAI; model: string; urgent?: boolean };
 
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-const contains = (haystack: string | null | undefined, needle: string) =>
-  (haystack ?? "").toLowerCase().includes(needle.toLowerCase());
+/**
+ * Token-based fuzzy match: every word in the query must appear in the title.
+ * "math problems" matches "Math Problems (1/2)" and "math-problems review".
+ * Falls back to substring for single-token queries.
+ */
+function matchesQuery(haystack: string | null | undefined, needle: string): boolean {
+  const hay = (haystack ?? "").toLowerCase();
+  const q = needle.trim().toLowerCase();
+  if (!q) return false;
+  if (hay.includes(q)) return true;
+  const tokens = q.split(/[^a-z0-9]+/).filter(Boolean);
+  if (tokens.length <= 1) return false;
+  return tokens.every((t) => hay.includes(t));
+}
+
+/** "16:30" -> minutes, null for anything else. */
+function timeHintToMinutes(v: unknown): number | null {
+  const s = String(v ?? "").trim();
+  if (!/^\d{1,2}:\d{2}$/.test(s)) return null;
+  const [h, m] = s.split(":").map(Number);
+  if (h > 23 || m > 59) return null;
+  return h * 60 + m;
+}
+
+/** True when a block overlaps the optional time hints (used to disambiguate). */
+function overlapsTimeHint(
+  block: ScheduledBlockRow,
+  startHint: number | null,
+  endHint: number | null,
+): boolean {
+  if (startHint === null && endHint === null) return true;
+  const s = minutesOf(block.start_time);
+  const e = minutesOf(block.end_time);
+  const qs = startHint ?? endHint!;
+  const qe = endHint ?? startHint!;
+  return s < qe && qs < e;
+}
+
+const formatBlockRef = (b: ScheduledBlockRow) =>
+  `"${b.title}" on ${b.date} ${trimTime(b.start_time)}-${trimTime(b.end_time)}`;
 
 /** The planner must never book into the past — spoken weekday names are ambiguous. */
 function pastDateError(date: string, field: string) {
@@ -444,14 +509,14 @@ function resolveBoundary(
   if (/^\d{1,2}:\d{2}$/.test(value)) return minutesOf(value);
 
   const weekday = parseISODate(date).getDay();
-  const commitment = commitments.find((c) => c.days_of_week.includes(weekday) && contains(c.name, value));
+  const commitment = commitments.find((c) => c.days_of_week.includes(weekday) && matchesQuery(c.name, value));
   if (commitment) {
     return edge === "end"
       // A fixed commitment's buffer belongs to whatever follows it.
       ? minutesOf(commitment.end_time) + prefs.buffer_minutes_after_fixed_events
       : minutesOf(commitment.start_time);
   }
-  const block = blocks.find((b) => b.date === date && contains(b.title, value));
+  const block = blocks.find((b) => b.date === date && matchesQuery(b.title, value));
   if (block) return minutesOf(edge === "end" ? block.end_time : block.start_time);
   return null;
 }
@@ -509,7 +574,9 @@ async function weekSchedule(startDate?: string) {
         free_windows: freeWindows(date, dayBlocks, dayCommitments, prefs),
         fixed_commitments: dayCommitments
           .map((c) => ({
+            id: c.id,
             name: c.name,
+            immutable: true,
             start_time: trimTime(c.start_time),
             end_time: trimTime(c.end_time),
             notes: c.notes ?? null,
@@ -585,10 +652,15 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
     case "add_one_off_event": {
       const invalid = pastDateError(args.date, "date");
       if (invalid) return invalid;
-      const overlap =
-        (await fixedOverlapError(args.date, args.start_time, args.end_time)) ??
-        (await eventOverlapError(args.date, args.start_time, args.end_time));
-      if (overlap) return overlap;
+      const urgent = ctx?.urgent === true;
+      const fixedClash = await fixedOverlapError(args.date, args.start_time, args.end_time);
+      if (fixedClash) return fixedClash;
+      // Urgent requests displace overlapping one-off events instead of
+      // bouncing off them; fixed commitments still always win.
+      if (!urgent) {
+        const eventClash = await eventOverlapError(args.date, args.start_time, args.end_time);
+        if (eventClash) return eventClash;
+      }
 
       const event = await insertBlock({
         source_type: "event",
@@ -600,9 +672,10 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       });
 
       // Conflict resolution runs before the model gets control back.
-      const outcome = await resolveConflicts(args.date, event);
+      const outcome = await resolveConflicts(args.date, event, { urgent });
       return {
         event,
+        urgent,
         conflicts_resolved: outcome.moved,
         conflicts_unresolved: outcome.unresolved,
         day_after_change: (await weekSchedule(args.date)).days.find((d) => d.date === args.date),
@@ -691,9 +764,9 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       const dayBlocks = (await loadBlocks(date, date)).filter((b) => b.date === date);
       const targets: ScheduledBlockRow[] = [];
       for (const query of order) {
-        const matches = dayBlocks.filter((b) => contains(b.title, query) && !targets.some((t) => t.id === b.id));
+        const matches = dayBlocks.filter((b) => matchesQuery(b.title, query) && !targets.some((t) => t.id === b.id));
         if (matches.length === 0) {
-          const clash = (await loadCommitments()).find((c) => contains(c.name, query));
+          const clash = (await loadCommitments()).find((c) => matchesQuery(c.name, query));
           return {
             error: clash
               ? `"${clash.name}" is a fixed commitment — it cannot be reordered. Tell the user it would have to change under Fixed commitments.`
@@ -790,11 +863,30 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       };
     }
 
+    case "suggest_middle_slot": {
+      const date = String(args.date ?? "").trim();
+      if (!date) return { error: "date is required — use upcoming_dates for weekday names" };
+      const pd = pastDateError(date, "date");
+      if (pd) return pd;
+      const out = await suggestMiddleSlot({
+        date,
+        anchor: String(args.anchor ?? "").trim() || undefined,
+        earliest: String(args.earliest ?? "").trim() || undefined,
+        latest: String(args.latest ?? "").trim() || undefined,
+        durationMinutes: Number.isFinite(Number(args.duration_minutes)) ? Number(args.duration_minutes) : undefined,
+        title: String(args.title ?? "").trim(),
+      });
+      return out.slot
+        ? { slot: out.slot, duration_minutes: out.durationMinutes, duration_assumed: out.durationAssumed, window: out.window }
+        : { slot: null, duration_minutes: out.durationMinutes, duration_assumed: out.durationAssumed, window: out.window, reason: out.reason };
+    }
+
     case "find_open_slot": {
       const slot = await findOpenSlot({
         durationMinutes: args.duration_minutes,
         deadline: args.deadline,
         earliestDate: args.earliest_date,
+        ignorePreferred: ctx?.urgent === true,
       });
       return slot ? { slot } : { slot: null, reason: "No slot fits inside the user's preferences." };
     }
@@ -923,9 +1015,9 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       if (overlap) return overlap;
 
       const all = await db.tasks.toArray();
-      let matches = all.filter((t) => contains(t.name, query)).slice(0, 5);
+      let matches = all.filter((t) => matchesQuery(t.name, query)).slice(0, 5);
       if (matches.length === 0) {
-        matches = all.filter((t) => contains(t.linked_class_or_project, query)).slice(0, 5);
+        matches = all.filter((t) => matchesQuery(t.linked_class_or_project, query)).slice(0, 5);
       }
       if (matches.length === 0) {
         return { error: `No assignment matching "${query}" found. Create it first with add_assignment.` };
@@ -955,7 +1047,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         start_time: start,
         end_time: end,
       });
-      const outcome = await resolveConflicts(date, block);
+      const outcome = await resolveConflicts(date, block, { urgent: ctx?.urgent === true });
       return {
         task,
         block,
@@ -984,7 +1076,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
 
       const candidates: { kind: "fixed" | "block"; id: string; title: string; notes: string | null }[] = [
         ...commitments
-          .filter((c) => contains(c.name, query))
+          .filter((c) => matchesQuery(c.name, query))
           .slice(0, 5)
           .map((c: FixedCommitmentRow) => ({
             kind: "fixed" as const,
@@ -993,7 +1085,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
             notes: c.notes ?? null,
           })),
         ...blocks
-          .filter((b) => contains(b.title, query))
+          .filter((b) => matchesQuery(b.title, query))
           .slice(0, 5)
           .map((b: ScheduledBlockRow) => ({
             kind: "block" as const,
@@ -1032,7 +1124,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       if (!query) return { error: "block_query is required" };
 
       const commitments = await db.fixed_commitments.toArray();
-      const fixedHit = commitments.find((c) => contains(c.name, query));
+      const fixedHit = commitments.find((c) => matchesQuery(c.name, query));
       if (fixedHit) {
         if (args.confirmed !== true) {
           return {
@@ -1046,12 +1138,22 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         };
       }
 
+      const dateHint = String(args.date ?? "").trim() || null;
+      const startHint = timeHintToMinutes(args.start_time);
+      const endHint = timeHintToMinutes(args.end_time);
+      const hasTimeHint = startHint !== null || endHint !== null;
+
       const all = await db.scheduled_blocks.toArray();
       const rows = all
-        .filter((b) => contains(b.title, query) && (!args.date || b.date === args.date))
+        .filter(
+          (b) =>
+            matchesQuery(b.title, query) &&
+            (!dateHint || b.date === dateHint) &&
+            overlapsTimeHint(b, startHint, endHint),
+        )
         .slice(0, 5);
       if (rows.length === 0) {
-        return { error: `No scheduled block matching "${query}"${args.date ? ` on ${args.date}` : ""} found.` };
+        return { error: `No scheduled block matching "${query}"${dateHint ? ` on ${dateHint}` : ""} found.` };
       }
 
       let target = rows[0];
@@ -1060,11 +1162,14 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         if (exact.length === 1) target = exact[0];
         else {
           return {
-            error: `Multiple blocks matching "${query}": ${rows.map((r) => `"${r.title}" on ${r.date}`).join(", ")}. Ask which one.`,
+            error: `Multiple blocks matching "${query}": ${rows.map(formatBlockRef).join(", ")}. Ask which one (day and time).`,
           };
         }
       }
-      if (args.confirmed !== true) {
+      // Fast path: title + date + time pin exactly one block — the user's
+      // "remove math problems 4:30 to 6:30" is explicit enough to act on.
+      const fastPath = rows.length === 1 && dateHint && hasTimeHint;
+      if (args.confirmed !== true && !fastPath) {
         return {
           needs_confirmation: true,
           preview: `Delete "${target.title}" on ${target.date}? Say yes or tap Confirm`,
@@ -1072,7 +1177,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         };
       }
       await db.scheduled_blocks.delete(target.id);
-      return { deleted: true, block: target };
+      return { deleted: true, fast_path: Boolean(fastPath && args.confirmed !== true), block: target };
     }
 
     case "reschedule_block": {
@@ -1090,15 +1195,26 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       if (overlap) return overlap;
 
       const commitments = await db.fixed_commitments.toArray();
-      const fixedHit = commitments.find((c) => contains(c.name, query));
+      const fixedHit = commitments.find((c) => matchesQuery(c.name, query));
       if (fixedHit) {
         return {
           error: `Cannot reschedule fixed commitment "${fixedHit.name}" via voice. Tell the user it's a fixed commitment they'd need to change under Fixed commitments.`,
         };
       }
 
+      const srcDate = String((args as any).date ?? "").trim() || null;
+      const srcStart = timeHintToMinutes((args as any).start_time);
+      const srcEnd = timeHintToMinutes((args as any).end_time);
+
       const all = await db.scheduled_blocks.toArray();
-      const rows = all.filter((b) => contains(b.title, query)).slice(0, 5);
+      const rows = all
+        .filter(
+          (b) =>
+            matchesQuery(b.title, query) &&
+            (!srcDate || b.date === srcDate) &&
+            overlapsTimeHint(b, srcStart, srcEnd),
+        )
+        .slice(0, 5);
       if (rows.length === 0) return { error: `No scheduled block matching "${query}" found.` };
 
       let target = rows[0];
@@ -1107,7 +1223,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         if (exact.length === 1) target = exact[0];
         else {
           return {
-            error: `Multiple blocks matching "${query}": ${rows.map((r) => `"${r.title}" on ${r.date}`).join(", ")}. Ask which one.`,
+            error: `Multiple blocks matching "${query}": ${rows.map(formatBlockRef).join(", ")}. Ask which one (day and time).`,
           };
         }
       }
@@ -1124,7 +1240,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         previous_start_time: trimTime(target.start_time),
       });
       const updated = (await db.scheduled_blocks.get(target.id)) as ScheduledBlockRow;
-      const outcome = await resolveConflicts(newDate, updated);
+      const outcome = await resolveConflicts(newDate, updated, { urgent: ctx?.urgent === true });
       return {
         block: updated,
         moved_from: `${target.date} ${trimTime(target.start_time)}`,
