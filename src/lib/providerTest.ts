@@ -44,6 +44,12 @@ export async function testLlmKey(providerRaw: string, modelRaw: string, apiKey: 
       throw e;
     }
   } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    // The request never reached the provider (offline, VPN, firewall,
+    // ad-blocker, DNS). That is not a key problem — say so plainly.
+    if (/connection error|failed to fetch|network|load failed|timed out|timeout|econn|enotfound|eai_again|ehost|epipe/i.test(raw)) {
+      return { ok: false, message: `${provider} ${model}: couldn't reach the ${provider} server — check internet, VPN, or ad-blocker, then retry.` };
+    }
     // Name the provider + model so a failure is diagnosable at a glance.
     return { ok: false, message: `${provider} ${model}: ${plainError(e)}` };
   }

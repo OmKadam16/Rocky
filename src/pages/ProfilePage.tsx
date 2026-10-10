@@ -116,6 +116,10 @@ export default function ProfilePage() {
     (!voice || voice === DEFAULT_VOICE_ID ? "Default voice" : isVoiceId(voice) ? "Custom voice" : voice);
   const llmKeyMask = data?.profile.has_llm_key ? data.profile.llm_key_mask : "Not set — add in onboarding";
   const elKeyMask = data?.profile.has_el_key ? data.profile.el_key_mask : "Not set";
+  // The saved key belongs to whichever provider was selected when it was saved.
+  // If the user switched providers since, say so — otherwise they test an
+  // OpenAI key against Gemini and get a confusing failure.
+  const savedProvider = data?.profile.provider ? normalizeProvider(data.profile.provider as string) : null;
 
   /** Returns true on success. Callers must only clear key fields when true. */
   const saveProfile = async (patch: Record<string, unknown>): Promise<boolean> => {
@@ -217,6 +221,9 @@ export default function ProfilePage() {
                           const p = normalizeProvider(e.target.value);
                           setProvider(p);
                           setModel(defaultModelFor(p));
+                          // Keys are per-provider: a key typed or autofilled for the
+                          // old provider must not linger and be tested/saved as the new one.
+                          setLlmKey("");
                           setLlmTest(null);
                         }}
                         className="h-11 w-full cursor-pointer appearance-none rounded-[3px] border border-line-strong bg-card px-[13px] font-sans text-[15px] text-ink outline-none"
@@ -243,6 +250,9 @@ export default function ProfilePage() {
                   </div>
                   <label className="flex flex-col gap-[10px]">
                     <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">API key</span>
+                    {!!data?.profile.has_llm_key && !!savedProvider && savedProvider !== provNorm && (
+                      <span className="font-mono text-[10.5px] text-warm">Saved key is for {savedProvider} — paste your {provNorm} key below, then Test key.</span>
+                    )}
                     <div className="flex items-center gap-3 border-b border-line-strong pb-[9px]">
                       <input type={llmKeyShown ? "text" : "password"} value={llmKey} onChange={(e) => { setLlmKey(e.target.value); setLlmTest(null); }} placeholder="Paste your API key" className="min-w-0 flex-1 border-0 bg-transparent font-mono text-[14px] text-ink outline-none" />
                       <button onClick={() => setLlmKeyShown((v) => !v)} className="flex-none cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">{llmKeyShown ? "Hide" : "Show"}</button>

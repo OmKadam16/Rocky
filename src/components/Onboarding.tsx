@@ -714,6 +714,8 @@ export default function Onboarding({ onDone, theme, onToggleTheme }: Props) {
                     const p = normalizeProvider(e.target.value);
                     setProvider(p);
                     setModel(defaultModelFor(p));
+                    // Keys are per-provider: never carry one across providers.
+                    setLlmKey("");
                     setLlmTest(null);
                   }}
                   className="h-[46px] w-full cursor-pointer appearance-none rounded-[3px] border border-line-strong bg-card px-[14px] font-sans text-[15px] text-ink outline-none"

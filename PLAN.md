@@ -208,3 +208,7 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   never in code or chat.
 - 2026-10-10: Gemini key probe fixed (`providerTest.ts`): thinking models fail closed on a
   1-token cap, so Gemini probes uncapped; failures now name provider + model for diagnosis.
+- 2026-10-10: Provider-switch key hygiene (Profile + onboarding): changing provider clears
+  the key field so an old OpenAI key can't be tested/saved as Gemini; Profile shows a
+  "Saved key is for X — paste your Y key" hint on mismatch. Network-level failures now say
+  "couldn't reach the server" instead of "Connection error."
