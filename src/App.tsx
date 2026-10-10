@@ -170,7 +170,7 @@ export default function App() {
         />
       ) : page === "assignments" && ASSIGNMENTS_ENABLED ? (
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll-assignments" className="flex min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth">
+          <main id="main-scroll-assignments" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
             <AssignmentsPage
               assignments={assignments}
               onAdd={async (a) => {
@@ -216,7 +216,7 @@ export default function App() {
         </div>
       ) : page === "tasks" ? (
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll-tasks" className="flex min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth">
+          <main id="main-scroll-tasks" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
             <TasksPage
               assignments={assignments}
               onAdd={async (a) => {
@@ -234,7 +234,7 @@ export default function App() {
           <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} onToggle={assistant.toggle} onSend={assistant.send} />
         </div>
       ) : page === "dashboard" ? (
-        <main id="main-scroll-dashboard" className="flex min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
+        <main id="main-scroll-dashboard" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
           {error ? (
             <div className="mt-11 max-w-[620px]">
               <h1 className="text-display font-medium tracking-[-0.028em]">Can't reach your calendar.</h1>
@@ -250,14 +250,14 @@ export default function App() {
         <ProfilePage />
       ) : page === "memory" ? (
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll-memory" className="flex min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth">
+          <main id="main-scroll-memory" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
             <MemoryPage />
           </main>
           <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} onToggle={assistant.toggle} onSend={assistant.send} />
         </div>
       ) : (
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll" className="flex min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
+          <main id="main-scroll" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
             {view === "month" ? (
               <>
                 <div className="flex items-center justify-between gap-4">

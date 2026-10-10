@@ -56,7 +56,7 @@ export default function Sidebar({ page, onNavigate, open, onToggle, fixedCount, 
                 aria-label={soon ? `${label} — coming soon` : label}
                 title={soon ? `${label} — coming soon` : undefined}
                 aria-current={active ? "page" : undefined}
-                className={`box-border flex w-full justify-center border-l-2 py-[11px] ${
+                className={`box-border flex w-full justify-center border-l-2 py-[11px] transition-colors duration-150 ${
                   soon ? "cursor-default opacity-40" : "cursor-pointer"
                 } ${active ? "border-accent bg-panel" : "border-transparent"}`}
               >
@@ -99,7 +99,7 @@ export default function Sidebar({ page, onNavigate, open, onToggle, fixedCount, 
               disabled={soon}
               title={soon ? `${label} — coming soon` : undefined}
               aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-3 border-l-2 px-[22px] py-[11px] text-left transition-colors ${
+              className={`flex items-center gap-3 border-l-2 px-[22px] py-[11px] text-left transition-colors duration-150 ${
                 soon
                   ? "cursor-default border-transparent text-ink-muted opacity-60"
                   : active

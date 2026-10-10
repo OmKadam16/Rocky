@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import type { AssistantState, AssistantTurn } from "../types";
 import MicButton from "./MicButton";
 import { voiceInputSupported } from "../lib/speech";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 const STATUS_LABEL: Record<AssistantState, string> = {
   idle: "Idle",
@@ -101,29 +104,42 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
         </div>
       </div>
 
-      <div ref={thread} className="flex min-h-0 flex-1 flex-col gap-[26px] overflow-y-auto px-[34px] py-5">
-        {turns.map((turn) =>
-          turn.role === "user" ? (
-            <div key={turn.id} className="flex flex-col items-end gap-2 pl-10">
-              <div className="font-mono text-micro tracking-tab uppercase text-grey-soft">You</div>
-              <div className="max-w-[300px] rounded-[6px] rounded-tr-[2px] border border-line bg-done px-[15px] py-[11px] text-body leading-[1.45] text-ink [text-wrap:pretty]">
-                {turn.text}
-              </div>
-            </div>
-          ) : (
-            <div
-              key={turn.id}
-              className="flex flex-col gap-2 border-l-2 border-accent-line pl-[14px] pr-10"
-            >
-              <div className="font-mono text-micro tracking-tab uppercase text-accent">
-                Assistant
-              </div>
-              <div className="max-w-[316px] text-body leading-[1.5] text-ink-soft [text-wrap:pretty]">
-                {turn.text}
-              </div>
-            </div>
-          ),
-        )}
+      <div ref={thread} className="flex min-h-0 flex-1 flex-col gap-[26px] overflow-y-auto overscroll-contain px-[34px] py-5">
+        <AnimatePresence initial={false}>
+          {turns.map((turn) =>
+            turn.role === "user" ? (
+              <motion.div
+                key={turn.id}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: EASE }}
+                className="flex flex-col items-end gap-2 pl-10"
+              >
+                <div className="font-mono text-micro tracking-tab uppercase text-grey-soft">You</div>
+                <div className="max-w-[300px] rounded-[6px] rounded-tr-[2px] border border-line bg-done px-[15px] py-[11px] text-body leading-[1.45] text-ink [text-wrap:pretty]">
+                  {turn.text}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key={turn.id}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: EASE }}
+                className="flex flex-col gap-2 border-l-2 border-accent-line pl-[14px] pr-10"
+              >
+                <div className="font-mono text-micro tracking-tab uppercase text-accent">
+                  Assistant
+                </div>
+                <div className="max-w-[316px] text-body leading-[1.5] text-ink-soft [text-wrap:pretty]">
+                  {turn.text}
+                </div>
+              </motion.div>
+            ),
+          )}
+        </AnimatePresence>
 
         {/* Sits where the reply will land, labelled like one, so a slow turn
             reads as working rather than broken. */}
