@@ -23,7 +23,12 @@ export async function runVoiceSelfTest(): Promise<VoiceCheckStage[]> {
   const el = (await getSecret("el_key").catch(() => null))?.trim() ?? "";
   if (!llm || !el) {
     const missing = [!llm ? "AI key" : null, !el ? "ElevenLabs key" : null].filter(Boolean).join(" and ");
-    stages.push({ id: "keys", label: "Keys saved", ok: false, message: `Missing ${missing} — add them first, then Save.` });
+    stages.push({
+      id: "keys",
+      label: "Keys saved",
+      ok: false,
+      message: `Missing ${missing} in storage — testing a typed key is not enough. Type each key above, Test it, then press Save.`,
+    });
     return stages;
   }
   stages.push({ id: "keys", label: "Keys saved", ok: true, message: "Both keys are stored on this device." });

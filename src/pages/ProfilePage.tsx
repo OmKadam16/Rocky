@@ -266,6 +266,9 @@ export default function ProfilePage() {
                         {llmTesting ? "Testing…" : "Test key"}
                       </button>
                       {llmTest && <span className={`font-mono text-[11px] ${llmTest.ok ? "text-accent-deep" : "text-warm"}`}>{llmTest.message}</span>}
+                      {llmTest?.ok && !data?.profile.has_llm_key && (
+                        <span className="font-mono text-[11px] text-warm">Tested OK — press Save below to keep it.</span>
+                      )}
                     </div>
                   </label>
                   <div className="flex items-center gap-4">
@@ -325,6 +328,9 @@ export default function ProfilePage() {
                         {elTesting ? "Testing…" : "Test key"}
                       </button>
                       {elTest && <span className={`font-mono text-[11px] ${elTest.ok ? "text-accent-deep" : "text-warm"}`}>{elTest.message}</span>}
+                      {elTest?.ok && !data?.profile.has_el_key && (
+                        <span className="font-mono text-[11px] text-warm">Tested OK — press Save below to keep it.</span>
+                      )}
                     </div>
                   </label>
                   <div className="overflow-hidden rounded-[3px] border border-line bg-card">
