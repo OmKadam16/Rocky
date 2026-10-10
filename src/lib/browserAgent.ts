@@ -233,3 +233,127 @@ export async function liveAgentStep(snapshot: PageSnapshot, intent: BookingInten
   });
   return parseAgentAction(raw.choices[0]?.message?.content ?? "");
 }
+
+/** A ModelCall bound to the real browser key. Null when the key is missing. */
+export async function liveModelCall(): Promise<ModelCall | null> {
+  const client = await browserClient().catch(() => null);
+  if (!client) return null;
+  return async (messages) => {
+    const raw = await client.chat.completions.create({ model: BROWSER_MODEL, messages: messages as never });
+    return raw.choices[0]?.message?.content ?? "";
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Drive loop: snapshot -> worker -> act, until booked, blocked, or capped.
+// Runs in the renderer and drives the desktop agent window over IPC, so the
+// user watches every step. Terminal states always annotate the calendar hold
+// (when there is one) and always leave the window open — proof stays visible,
+// and the user can take over from any failed or blocked state.
+// ---------------------------------------------------------------------------
+
+/** The IPC driver, injected so tests can stub the window. */
+export type LoopDriver = {
+  open: () => Promise<void>;
+  navigate: (url: string) => Promise<PageSnapshot>;
+  snapshot: () => Promise<PageSnapshot>;
+  click: (selector: string) => Promise<PageSnapshot>;
+  type: (selector: string, text: string) => Promise<PageSnapshot>;
+  close: () => Promise<void>;
+};
+
+export type Holds = {
+  annotate: (holdId: string, title: string) => Promise<void>;
+};
+
+export type BookingResult =
+  | { status: "booked"; summary: string; hold_block_id: string | null }
+  | { status: "needs_user"; question: string; hold_block_id: string | null; page_url: string | null }
+  | { status: "failed"; reason: string; hold_block_id: string | null; deep_link: string };
+
+export function finalHoldTitle(intent: BookingIntent, outcome: "booked" | "failed"): string {
+  const base = buildHoldTitle(intent).replace(" (booking…)", "");
+  return outcome === "booked" ? `${base} (booked)` : `${base} (booking failed — finish by hand)`;
+}
+
+export async function runBookingLoop(opts: {
+  driver: LoopDriver;
+  model: ModelCall;
+  intent: BookingIntent;
+  startUrl: string;
+  holdBlockId?: string | null;
+  holds?: Holds;
+  maxSteps?: number;
+  deadlineMs?: number;
+  onStep?: (e: { step: number; action: AgentAction; url: string }) => void;
+}): Promise<BookingResult> {
+  const {
+    driver,
+    model,
+    intent,
+    startUrl,
+    holdBlockId = null,
+    holds,
+    maxSteps = 10,
+    deadlineMs = 120_000,
+    onStep,
+  } = opts;
+  const fail = async (reason: string): Promise<BookingResult> => {
+    if (holds && holdBlockId) await holds.annotate(holdBlockId, finalHoldTitle(intent, "failed")).catch(() => {});
+    return { status: "failed", reason, hold_block_id: holdBlockId, deep_link: startUrl };
+  };
+  const start = Date.now();
+  let snap: PageSnapshot;
+  try {
+    await driver.open();
+    snap = await driver.navigate(startUrl);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+  for (let step = 0; step < maxSteps; step += 1) {
+    if (Date.now() - start > deadlineMs) {
+      return fail("Booking took too long — the page is still open for you to finish by hand.");
+    }
+    let action: AgentAction;
+    try {
+      action = await nextAgentAction(model, snap, intent);
+    } catch (e) {
+      return fail(`Brain call failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    onStep?.({ step: step + 1, action, url: snap.url });
+    try {
+      switch (action.kind) {
+        case "navigate":
+          snap = await driver.navigate(action.url);
+          break;
+        case "click":
+          snap = await driver.click(action.selector);
+          break;
+        case "type":
+          // The agent never handles passwords: a login wall stops the run and
+          // hands the visible window to the user instead of failing silently.
+          if (/passw/i.test(action.selector)) {
+            return {
+              status: "needs_user",
+              question: "This page wants a login — sign in in the agent window, then tell me to continue.",
+              hold_block_id: holdBlockId,
+              page_url: snap.url,
+            };
+          }
+          snap = await driver.type(action.selector, action.text);
+          break;
+        case "snapshot":
+          snap = await driver.snapshot();
+          break;
+        case "ask_user":
+          return { status: "needs_user", question: action.question, hold_block_id: holdBlockId, page_url: snap.url };
+        case "done":
+          if (holds && holdBlockId) await holds.annotate(holdBlockId, finalHoldTitle(intent, "booked")).catch(() => {});
+          return { status: "booked", summary: action.summary, hold_block_id: holdBlockId };
+      }
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return fail("Still going after 10 steps — the page is still open for you to finish by hand.");
+}

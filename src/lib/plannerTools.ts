@@ -25,13 +25,15 @@ import {
   buildBookingSearchUrl,
   buildHoldTitle,
   formatProposal,
+  liveModelCall,
   missingBookingSlots,
   nextBookingQuestion,
   rememberArea,
   rememberedArea,
+  runBookingLoop,
   type BookingIntent,
 } from "./browserAgent";
-import { agentNavigate, agentOpen, isAgentAvailable } from "./browserDriver";
+import { agentClick, agentClose, agentNavigate, agentOpen, agentSnapshot, agentType, isAgentAvailable } from "./browserDriver";
 import {
   WEEKDAY_LONG,
   addDays,
@@ -406,7 +408,7 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
     function: {
       name: "book_appointment",
       description:
-        "Book after an explicit yes. Without confirmed:true it only returns a confirmation preview — call it again with confirmed:true and the hold_block_id on a later turn. Opens the booking page in the desktop agent window, or hands back a deep link when there is none.",
+        "Book after an explicit yes. Without confirmed:true it only returns a confirmation preview — call it again with confirmed:true and the hold_block_id on a later turn. With confirmation it drives the booking page in the desktop agent window to completion (booked, blocked, or failed), or hands back a deep link when there is no agent window.",
       parameters: {
         type: "object",
         properties: {
@@ -1434,26 +1436,55 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
             "No desktop agent window here. Give the user the link and the slot; they finish the booking by hand and the hold stays on their calendar.",
         };
       }
-      // Desktop: open the booking page in the visible agent window and report
-      // the first snapshot. The multi-step drive loop continues from here.
-      try {
-        await agentOpen();
-        const snap = await agentNavigate(searchUrl);
+      // Desktop: drive the booking page in the visible agent window to
+      // completion (capped: 10 steps, 2 minutes). The user watches every step;
+      // the window stays open on every terminal state as proof or for takeover.
+      const callModel = await liveModelCall().catch(() => null);
+      if (!callModel) {
         return {
-          status: "agent_started",
-          hold_block_id: args.hold_block_id ?? null,
-          page: { url: snap.url, title: snap.title },
-          page_text: snap.text.slice(0, 1500),
-          next: "Narrate what the booking page shows and ask the user for the next detail. One page step per turn.",
-        };
-      } catch (e) {
-        return {
-          status: "agent_failed",
+          status: "failed",
           hold_block_id: args.hold_block_id ?? null,
           deep_link: searchUrl,
-          error: e instanceof Error ? e.message : String(e),
+          reason: "Add your browser key in Profile → Model first, then say yes again.",
         };
       }
+      const size = Number(args.party_size);
+      const intent: BookingIntent = {
+        venue: venue || null,
+        area: area || null,
+        date: String(args.date ?? "").trim() || null,
+        startTime: String(args.start_time ?? "").trim() || null,
+        endTime: String(args.end_time ?? "").trim() || null,
+        partySize: Number.isFinite(size) && size > 0 ? Math.floor(size) : null,
+      };
+      const result = await runBookingLoop({
+        driver: {
+          open: agentOpen,
+          navigate: agentNavigate,
+          snapshot: agentSnapshot,
+          click: agentClick,
+          type: agentType,
+          close: agentClose,
+        },
+        model: callModel,
+        intent,
+        startUrl: searchUrl,
+        holdBlockId: typeof args.hold_block_id === "string" ? args.hold_block_id : null,
+        holds: {
+          annotate: async (id: string, title: string) => {
+            await db.scheduled_blocks.update(id, { title } as any);
+          },
+        },
+      });
+      return {
+        ...result,
+        speak:
+          result.status === "booked"
+            ? "Read the summary as the receipt, one short line."
+            : result.status === "needs_user"
+              ? "Relay the question verbatim — the booking page is open in front of the user."
+              : "Say it didn't go through, give the deep link, and confirm the failed hold is still on their calendar.",
+      };
     }
 
     default:

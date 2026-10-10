@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   buildBookingSearchUrl,
   buildHoldTitle,
+  finalHoldTitle,
   formatProposal,
   isBookingComplete,
   missingBookingSlots,
   nextAgentAction,
   nextBookingQuestion,
   parseAgentAction,
+  runBookingLoop,
   type BookingIntent,
+  type LoopDriver,
+  type PageSnapshot,
 } from "./browserAgent";
 
 const FULL: BookingIntent = {
@@ -68,5 +72,74 @@ describe("agent action parsing", () => {
       FULL,
     );
     expect(action).toEqual({ kind: "type", selector: "#party", text: "2" });
+  });
+});
+
+describe("drive loop", () => {
+  const snap = (url: string): PageSnapshot => ({ url, title: "Book", text: "reserve a table" });
+
+  const stubDriver = (seen: string[]): LoopDriver => ({
+    open: async () => { seen.push("open"); },
+    navigate: async (url: string) => { seen.push(`go:${url}`); return snap(url); },
+    snapshot: async () => { seen.push("snap"); return snap("https://example.com/book"); },
+    click: async (selector: string) => { seen.push(`click:${selector}`); return snap("https://example.com/book"); },
+    type: async (selector: string, text: string) => { seen.push(`type:${selector}=${text}`); return snap("https://example.com/book"); },
+    close: async () => { seen.push("close"); },
+  });
+
+  it("books: acts, annotates the hold, leaves the window open", async () => {
+    const seen: string[] = [];
+    const annotated: [string, string][] = [];
+    const replies = ['{"kind":"click","selector":"#reserve"}', '{"kind":"done","summary":"Booked Nobu Fri 7:30pm for 2, ref X1"}'];
+    const result = await runBookingLoop({
+      driver: stubDriver(seen),
+      model: async () => replies.shift() ?? '{"kind":"snapshot"}',
+      intent: FULL,
+      startUrl: "https://example.com",
+      holdBlockId: "h1",
+      holds: { annotate: async (id, title) => { annotated.push([id, title]); } },
+    });
+    expect(result).toEqual({ status: "booked", summary: "Booked Nobu Fri 7:30pm for 2, ref X1", hold_block_id: "h1" });
+    expect(seen).toEqual(["open", "go:https://example.com", "click:#reserve"]);
+    expect(seen).not.toContain("close");
+    expect(annotated).toEqual([["h1", finalHoldTitle(FULL, "booked")]]);
+    expect(finalHoldTitle(FULL, "booked")).toBe("Nobu — 2, Fri 7:30pm (booked)");
+  });
+
+  it("hands unclear pages and login walls to the user, window open", async () => {
+    const login = await runBookingLoop({
+      driver: stubDriver([]),
+      model: async () => '{"kind":"type","selector":"#password","text":"x"}',
+      intent: FULL,
+      startUrl: "https://example.com",
+      holdBlockId: null,
+    });
+    expect(login.status).toBe("needs_user");
+    expect((login as { question: string }).question).toMatch(/login/i);
+
+    const vague = await runBookingLoop({
+      driver: stubDriver([]),
+      model: async () => "not json at all",
+      intent: FULL,
+      startUrl: "https://example.com",
+      holdBlockId: null,
+    });
+    expect(vague.status).toBe("needs_user");
+  });
+
+  it("caps runaway runs and annotates the hold failed", async () => {
+    const annotated: [string, string][] = [];
+    const result = await runBookingLoop({
+      driver: stubDriver([]),
+      model: async () => '{"kind":"snapshot"}',
+      intent: FULL,
+      startUrl: "https://example.com",
+      holdBlockId: "h9",
+      holds: { annotate: async (id, title) => { annotated.push([id, title]); } },
+      maxSteps: 3,
+    });
+    expect(result.status).toBe("failed");
+    expect((result as { deep_link: string }).deep_link).toBe("https://example.com");
+    expect(annotated).toEqual([["h9", finalHoldTitle(FULL, "failed")]]);
   });
 });

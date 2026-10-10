@@ -227,3 +227,8 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   deps: open/navigate/snapshot/click/type over IPC) + planner tools `find_restaurant`,
   `propose_booking` (calendar-checked hold), `book_appointment` (confirm-gated, deep-link
   fallback without desktop). Multi-step drive loop + live booking test still open (Om).
+- 2026-10-10: Drive loop wired (`runBookingLoop`): snapshot → GPT-5.4-mini → act, up to
+  10 steps / 2 minutes, still in the renderer over IPC so the user watches. Terminal states
+  annotate the hold (`(booked)` / `(booking failed — finish by hand)`), window stays open
+  as proof or for takeover; login walls and garbage output hand to the user, never act.
+  `book_appointment` (confirmed) runs it and returns booked / needs_user / failed.
