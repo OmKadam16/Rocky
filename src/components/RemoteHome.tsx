@@ -102,7 +102,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-48 pt-4">
+      <div className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto px-5 pb-48 pt-4 [-webkit-overflow-scrolling:touch]">
         {loading ? (
           <div className="font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
         ) : error ? (
@@ -204,7 +204,20 @@ function TalkDock({
     if (assistant.state === "listening") assistant.toggle();
   };
 
-  const lastReply = [...assistant.turns].reverse().find((t) => t.role === "assistant")?.text ?? null;
+  const lastAssistant = [...assistant.turns].reverse().find((t) => t.role === "assistant") ?? null;
+  const lastReply = lastAssistant?.text ?? null;
+  const [replyGone, setReplyGone] = useState(false);
+
+  // A new reply always shows; once the turn is over it clears after 2 s so
+  // only the calendar remains. Errors never auto-hide.
+  useEffect(() => {
+    setReplyGone(false);
+  }, [lastAssistant?.id]);
+  useEffect(() => {
+    if (!lastReply || replyGone || assistant.state !== "idle") return;
+    const t = window.setTimeout(() => setReplyGone(true), 2000);
+    return () => window.clearTimeout(t);
+  }, [lastReply, lastAssistant?.id, replyGone, assistant.state]);
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center border-t border-line bg-canvas">
@@ -212,7 +225,7 @@ function TalkDock({
         {assistant.error && (
           <div className="w-full rounded-[3px] border border-line bg-card px-3 py-2 font-mono text-meta leading-[1.5] text-grey">{assistant.error}</div>
         )}
-        {lastReply && assistant.state !== "thinking" && (
+        {lastReply && !replyGone && assistant.state !== "thinking" && (
           <div className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft">
             {lastReply}
           </div>

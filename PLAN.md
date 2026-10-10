@@ -187,5 +187,7 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   static 8-char codes (`XXXX-XXXX`, `0004` accepts legacy 6-char rows); visible Rotate code
   disconnects the phone until it enters the new code; `qrcode.react`/`jsqr` deps removed.
 - 2026-10-10: Phone UI fixes from the on-device screenshot: talk dock is a solid bottom bar
-  (replies sit inside it, above the mic, instead of floating over events), mic level bars moved
+  (replies sit inside it, above the mic, instead of   floating over events), mic level bars moved
   directly above the mic button, calendar list scrolls in its own container (`h-dvh` layout).
+- 2026-10-10: Phone reply clears 2 s after the turn goes idle (errors stay); calendar
+  scroller gets mobile touch treatment (`touch-pan-y`, contained overscroll, momentum).
