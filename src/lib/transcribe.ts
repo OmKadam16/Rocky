@@ -66,8 +66,8 @@ export function startTranscription(
     if (stream) stream.getTracks().forEach((t) => t.stop());
   };
 
-  /** `transcribe` is false when nothing was ever said. */
-  function finish(transcribe: boolean) {
+  /** `transcribe` is false when nothing was ever said. `byUser` when the mic button ended the turn. */
+  function finish(transcribe: boolean, byUser = false) {
     if (finished) return;
     finished = true;
     const shouldSend = transcribe && heardSpeech;
@@ -75,7 +75,7 @@ export function startTranscription(
     if (recorder && recorder.state !== "inactive") {
       recorder.onstop = () => {
         teardown();
-        if (shouldSend) void send(new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }));
+        if (shouldSend) void send(new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }), byUser);
         else {
           handlers.onEnd?.();
         }
@@ -94,9 +94,11 @@ export function startTranscription(
     return "turn.webm";
   }
 
-  async function send(blob: Blob) {
+  async function send(blob: Blob, byUser = false) {
     if (blob.size < 2000) {
-      // Too short to be speech — don't spend a request on it.
+      // Too short to be speech — don't spend a request on it. A deliberate
+      // tap-off stays silent; anything else says so out loud.
+      if (!byUser) handlers.onError?.("Didn't catch any audio — check the mic and try again.");
       handlers.onEnd?.();
       return;
     }
@@ -194,5 +196,6 @@ export function startTranscription(
       handlers.onEnd?.();
     });
 
-  return () => finish(true);
+  // Mic-button stop: the user ended the turn on purpose.
+  return () => finish(true, true);
 }

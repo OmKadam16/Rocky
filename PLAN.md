@@ -179,6 +179,10 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: QR scan hardening (phone couldn't scan while typed codes worked): plain-English insecure-context guard (LAN http blocks the camera — points to the Render link), video attach retries on `playing` event, BarcodeDetector failure fallback to jsQR, 12s no-decode hint, fixed stale expiry copy.
 - 2026-10-10: QR decode round-trip proven (the exact `qrcode.react` output decodes to the exact pair URL);
   both decoders now run in parallel so an empty native result can never block jsQR.
+- 2026-10-10: Keys must prove they work: Profile → Voice has Run voice check (saved keys →
+  real planner ping → real spoken reply, staged results); Profile saves no longer clear
+  key fields on failure; empty mic captures say so instead of vanishing (deliberate
+  tap-offs stay silent).
 - 2026-10-10: QR removed entirely (scanner never worked on-device): pairing is code-only with
   static 8-char codes (`XXXX-XXXX`, `0004` accepts legacy 6-char rows); visible Rotate code
   disconnects the phone until it enters the new code; `qrcode.react`/`jsqr` deps removed.

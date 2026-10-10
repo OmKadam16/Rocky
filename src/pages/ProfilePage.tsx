@@ -16,6 +16,7 @@ import {
 } from "../lib/models";
 import { testElevenKey, testLlmKey } from "../lib/providerTest";
 import { MEMORY_MODEL, checkOllama, hasMemoryModel } from "../lib/ollama";
+import { runVoiceSelfTest, type VoiceCheckStage } from "../lib/voiceCheck";
 import DevicesSection from "../components/DevicesSection";
 
 
@@ -68,6 +69,9 @@ export default function ProfilePage() {
   const [pLatest, setPLatest] = useState(() => getLS("vc-p-latest", "22:00"));
   const [pBuffer, setPBuffer] = useState(() => getLS("vc-p-buffer", "15"));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [checkStages, setCheckStages] = useState<VoiceCheckStage[] | null>(null);
   const [llmTest, setLlmTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [llmTesting, setLlmTesting] = useState(false);
   const [elTest, setElTest] = useState<{ ok: boolean; message: string } | null>(null);
@@ -113,12 +117,22 @@ export default function ProfilePage() {
   const llmKeyMask = data?.profile.has_llm_key ? data.profile.llm_key_mask : "Not set — add in onboarding";
   const elKeyMask = data?.profile.has_el_key ? data.profile.el_key_mask : "Not set";
 
-  const saveProfile = async (patch: Record<string, unknown>) => {
+  /** Returns true on success. Callers must only clear key fields when true. */
+  const saveProfile = async (patch: Record<string, unknown>): Promise<boolean> => {
     if ((patch as any).display_name) try { localStorage.setItem("vc-user-name", String((patch as any).display_name)); } catch {}
     if ((patch as any).about_text) try { localStorage.setItem("vc-about", String((patch as any).about_text)); } catch {}
     setSaving(true);
-    try { await update(patch); window.dispatchEvent(new Event("vc-profile-update")); } catch { window.dispatchEvent(new Event("vc-profile-update")); }
-    finally { setSaving(false); }
+    setSaveError("");
+    try {
+      await update(patch);
+      window.dispatchEvent(new Event("vc-profile-update"));
+      return true;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200));
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -255,8 +269,9 @@ export default function ProfilePage() {
                     </div>
                   </label>
                   <div className="flex items-center gap-4">
-                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} await saveProfile({ provider, model, llm_key: llmKey || undefined }); setLlmKey(""); setLlmOpen(false); }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
+                    <button onClick={async () => { try { localStorage.setItem("vc-provider", provider); localStorage.setItem("vc-model", model); } catch {} if (await saveProfile({ provider, model, llm_key: llmKey || undefined })) { setLlmKey(""); setLlmOpen(false); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
                     <button onClick={() => setLlmOpen(false)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
+                    {saveError && <span className="font-mono text-[11px] text-warm">{saveError}</span>}
                   </div>
                 </div>
               )}
@@ -351,9 +366,42 @@ export default function ProfilePage() {
                     </select>
                     <span className="font-mono text-[10.5px] text-grey-soft">How long Rocky waits after you stop talking before it answers.</span>
                   </label>
+                  <div className="flex flex-col gap-[10px] rounded-[3px] border border-line bg-card px-[15px] py-[13px]">
+                    <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Voice check</span>
+                    <span className="font-mono text-[10.5px] text-grey-soft">Proves the saved keys work end to end: planner thinks, voice speaks.</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setChecking(true);
+                          setCheckStages(null);
+                          try {
+                            setCheckStages(await runVoiceSelfTest());
+                          } finally {
+                            setChecking(false);
+                          }
+                        }}
+                        disabled={checking}
+                        className="w-fit cursor-pointer rounded-[3px] border border-line-strong px-4 py-2 font-mono text-[10px] tracking-[0.14em] uppercase text-grey hover:border-ink hover:text-ink disabled:opacity-60"
+                      >
+                        {checking ? "Checking…" : "Run voice check"}
+                      </button>
+                    </div>
+                    {checkStages && (
+                      <div className="flex flex-col gap-1.5">
+                        {checkStages.map((s) => (
+                          <div key={s.id} className="flex items-baseline gap-2 font-mono text-[11px] leading-[1.5]">
+                            <span className={s.ok ? "text-accent-deep" : "text-warm"}>{s.ok ? "✓" : "✕"}</span>
+                            <span className="text-grey">{s.label} —</span>
+                            <span className={s.ok ? "text-grey" : "text-warm"}>{s.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center gap-4">
-                    <button onClick={async () => { try { localStorage.setItem("vc-silence-ms", silenceMs); } catch {} await saveProfile({ voice, el_key: elKey || undefined }); setElKey(""); setVoiceOpen(false); }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
+                    <button onClick={async () => { try { localStorage.setItem("vc-silence-ms", silenceMs); } catch {} if (await saveProfile({ voice, el_key: elKey || undefined })) { setElKey(""); setVoiceOpen(false); } }} disabled={saving} className="cursor-pointer rounded-[3px] bg-ink px-[22px] py-[11px] text-[14px] font-medium text-canvas hover:bg-accent disabled:opacity-60">Save</button>
                     <button onClick={() => setVoiceOpen(false)} className="cursor-pointer font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">Cancel</button>
+                    {saveError && <span className="font-mono text-[11px] text-warm">{saveError}</span>}
                   </div>
                 </div>
               )}
