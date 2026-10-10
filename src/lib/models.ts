@@ -21,10 +21,12 @@ export type Provider = { id: string; label: string; soon: boolean };
 export type Model = { id: string; label: string; tested: boolean };
 
 /**
- * gpt-4o, not the mini. The planner lives or dies on tool calling, and the
- * mini skips tools and narrates the action instead often enough to matter —
- * which leaves the user with a calendar that disagrees with what it just told
- * them. Mini is still selectable for anyone who wants the cheaper turn.
+ * gpt-4o stays the default, not a mini. The planner lives or dies on tool
+ * calling, and the 4o mini skips tools and narrates the action instead often
+ * enough to matter — which leaves the user with a calendar that disagrees
+ * with what it just told them. The GPT-5 minis are far better tool-callers on
+ * paper, but none is verified against our 12 tools yet, so they stay
+ * opt-in (untested) until the verification pass. Same rule as Gemini.
  */
 export const DEFAULT_PROVIDER = "OpenAI";
 export const DEFAULT_MODEL = "gpt-4o";
@@ -48,6 +50,10 @@ export const PROVIDER_MODELS: Record<string, Model[]> = {
     { id: "gpt-4o", label: "GPT-4o", tested: true },
     { id: "gpt-4o-mini", label: "GPT-4o mini", tested: true },
     { id: "gpt-4.1", label: "GPT-4.1", tested: true },
+    { id: "gpt-5-mini", label: "GPT-5 mini (untested)", tested: false },
+    { id: "gpt-5-nano", label: "GPT-5 nano (untested)", tested: false },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 mini (untested)", tested: false },
+    { id: "gpt-5.4", label: "GPT-5.4 (untested)", tested: false },
   ],
   Gemini: [
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite (untested)", tested: false },

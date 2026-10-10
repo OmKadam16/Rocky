@@ -212,3 +212,6 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   the key field so an old OpenAI key can't be tested/saved as Gemini; Profile shows a
   "Saved key is for X — paste your Y key" hint on mismatch. Network-level failures now say
   "couldn't reach the server" instead of "Connection error."
+- 2026-10-10: OpenAI model list refreshed: added `gpt-5-mini`/`gpt-5-nano` (cheap daily
+  turns) + `gpt-5.4-mini`/`gpt-5.4` (native computer use for browser-agent work), all
+  `tested:false` until tool-call verification. Planner default stays `gpt-4o`.
