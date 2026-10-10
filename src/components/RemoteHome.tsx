@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAssistant } from "../hooks/useAssistant";
 import { useTheme } from "../hooks/useTheme";
@@ -209,20 +209,13 @@ function TalkDock({
   now: string;
 }) {
   void _now;
-  const [holding, setHolding] = useState(false);
   const [draft, setDraft] = useState("");
-  const holdingRef = useRefFlag(holding);
 
-  const down = () => {
+  // Tap to talk, tap to finish. Nothing ends the turn early — sliding a
+  // thumb off the button must never cancel what was said.
+  const tap = () => {
     void ensureAudioUnlocked();
-    if (assistant.state !== "idle") return;
-    setHolding(true);
     assistant.toggle();
-  };
-  const up = () => {
-    if (!holdingRef.current) return;
-    setHolding(false);
-    if (assistant.state === "listening") assistant.toggle();
   };
 
   const lastAssistant = [...assistant.turns].reverse().find((t) => t.role === "assistant") ?? null;
@@ -274,15 +267,11 @@ function TalkDock({
         )}
         <motion.button
           type="button"
-          onPointerDown={down}
-          onPointerUp={up}
-          onPointerLeave={up}
-          onPointerCancel={up}
-          onContextMenu={(e) => e.preventDefault()}
-          aria-label={assistant.state === "listening" ? "Release to send" : "Hold to talk to Rocky"}
+          onClick={tap}
+          aria-label={assistant.state === "listening" ? "Tap to finish and send" : "Tap to talk to Rocky"}
           whileTap={{ scale: 0.92 }}
           transition={{ duration: 0.15, ease: EASE }}
-          className={`grid h-[72px] w-[72px] cursor-pointer touch-none select-none place-items-center rounded-full text-canvas transition-colors ${
+          className={`grid h-[72px] w-[72px] cursor-pointer select-none place-items-center rounded-full text-canvas transition-colors ${
             assistant.state === "listening" ? "bg-accent" : "bg-ink hover:bg-accent"
           }`}
         >
@@ -293,7 +282,7 @@ function TalkDock({
           </span>
         </motion.button>
         <div className="font-mono text-micro tracking-tab uppercase text-grey">
-          {assistant.state === "listening" ? "Release to send" : offline ? "Hold to talk · laptop offline" : "Hold to talk"}
+          {assistant.state === "listening" ? "Tap to finish" : offline ? "Tap to talk · laptop offline" : "Tap to talk"}
         </div>
         <div className="flex w-full items-center gap-2">
           <input
@@ -323,12 +312,6 @@ function TalkDock({
       </div>
     </div>
   );
-}
-
-function useRefFlag(v: boolean) {
-  const r = useRef(v);
-  r.current = v;
-  return r;
 }
 
 function SettingsSheet({

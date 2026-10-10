@@ -146,7 +146,9 @@ export function useAssistant(onScheduleChange: () => void) {
         },
         mode === "conversation"
           ? { silenceMs, settledSilenceMs: Math.max(800, silenceMs - 100), openingMs: 8000 }
-          : { silenceMs, settledSilenceMs: Math.max(800, silenceMs - 100), openingMs: 20000 },
+          : // Tap-to-talk: pauses never end the turn — only the next tap does.
+            // Opening timeout and hard cap still apply as safety nets.
+            { silenceMs, settledSilenceMs: Math.max(800, silenceMs - 100), openingMs: 20000, manualStop: true },
       );
 
       if (!stop) {

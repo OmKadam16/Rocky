@@ -192,6 +192,9 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Laptop global smoothing: assistant turns fade/slide in, 150ms sidebar
   transitions, `overscroll-contain` on all laptop scroll areas. No new colors —
   dark mode contrast unchanged (existing tokens only).
+- 2026-10-10: Tap to talk everywhere: mic button taps to start and taps to finish
+  (no hold — a slipping thumb can't cancel a turn), and pauses never end a tap
+  turn early. Opening timeout and 90 s cap remain as safety nets.
 - 2026-10-10: Phone reply clears 2 s after the turn goes idle (errors stay); calendar
   scroller gets mobile touch treatment (`touch-pan-y`, contained overscroll, momentum).
 - 2026-10-10: UI polish (motion lib): `ExpandableCard` accordion for Profile Model/Voice

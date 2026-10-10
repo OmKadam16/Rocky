@@ -28,6 +28,12 @@ export type TranscribeOptions = {
   silenceMs?: number;
   openingMs?: number;
   maxTurnMs?: number;
+  /**
+   * Tap-to-talk: pauses never end the turn — only the mic button (the stop
+   * handle), the opening timeout, or the hard cap do. Levels and speech
+   * detection keep running so the UI still reacts while talking.
+   */
+  manualStop?: boolean;
 };
 
 export function startTranscription(
@@ -42,6 +48,7 @@ export function startTranscription(
   const silenceMs = opts.silenceMs ?? 1200;
   const openingMs = opts.openingMs ?? 15000;
   const maxTurnMs = opts.maxTurnMs ?? 90000;
+  const manualStop = opts.manualStop ?? false;
 
   let finished = false;
   let heardSpeech = false;
@@ -182,8 +189,10 @@ export function startTranscription(
             clearTimeout(openingTimer);
             handlers.onSpeechStart?.();
           }
-          if (silenceTimer) clearTimeout(silenceTimer);
-          silenceTimer = setTimeout(() => finish(true), silenceMs);
+          if (!manualStop) {
+            if (silenceTimer) clearTimeout(silenceTimer);
+            silenceTimer = setTimeout(() => finish(true), silenceMs);
+          }
         }
         raf = requestAnimationFrame(tick);
       };

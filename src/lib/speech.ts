@@ -46,6 +46,8 @@ export type RecognitionOptions = {
   openingMs?: number;
   /** Hard cap on a single turn. */
   maxTurnMs?: number;
+  /** Tap-to-talk: pauses never end the turn, only an explicit stop does. */
+  manualStop?: boolean;
 };
 
 /** Whether this device can capture a turn at all. */
@@ -64,6 +66,7 @@ export function startRecognition(
     silenceMs: opts.silenceMs,
     openingMs: opts.openingMs,
     maxTurnMs: opts.maxTurnMs,
+    manualStop: opts.manualStop,
   });
 }
 
