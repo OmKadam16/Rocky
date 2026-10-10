@@ -201,3 +201,8 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   (single expanding card, chevron, one-open-at-a-time), spring bottom sheet + theme pill +
   swipe-down in phone Settings, sliding tab pills, mic press + reply transitions, pair-flow
   step transitions, safe-area padding, shared motion tokens + reduced-motion support.
+- 2026-10-10: Gemini model list refreshed for booking-agent work: 2.5 ids replaced with
+  low-token `gemini-3.5-flash-lite` (default, cheap passes) + `gemini-3.5-flash`/`3.8-flash`
+  (Computer Use preview). Still `tested:false` until tool-call verification; planner default
+  stays GPT-4o. Key handling unchanged: Gemini key lives as a Supabase secret set by Om,
+  never in code or chat.

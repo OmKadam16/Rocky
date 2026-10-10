@@ -5,6 +5,13 @@
  * Grok ids are included for selection but marked untested until verified against
  * each provider's docs at build time — the picker labels them as such.
  *
+ * Gemini notes (Oct 2026): Google gates the 2.5 models to past users, so new
+ * work targets 3.5 Flash-Lite / 3.5 Flash via the Interactions API.
+ * Flash-Lite is the low-token default (cheap first passes, classification);
+ * 3.5 Flash carries the Computer Use preview for browser-agent work.
+ * Never put a Gemini key in a VITE_ variable or in code — it ships to the
+ * browser. The key lives as a Supabase secret (Om sets it in the dashboard).
+ *
  * `id` is what the API is given; `label` is what the user sees. Earlier builds
  * stored the label in the profile and sent that as the model, which the API
  * rejects — resolveModelId exists to undo that.
@@ -43,8 +50,9 @@ export const PROVIDER_MODELS: Record<string, Model[]> = {
     { id: "gpt-4.1", label: "GPT-4.1", tested: true },
   ],
   Gemini: [
-    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (untested)", tested: false },
-    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro (untested)", tested: false },
+    { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite (untested)", tested: false },
+    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash (untested)", tested: false },
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash (untested)", tested: false },
   ],
   Anthropic: [
     { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5 (untested)", tested: false },
