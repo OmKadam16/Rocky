@@ -1,0 +1,21 @@
+.claude/
+node_modules
+dist
+# Packaged DMGs — 130MB+ each, published as GitHub release assets instead
+release
+.DS_Store
+.rocketride/
+.env
+.env.local
+*.log
+npm-debug.log*
+.vscode/
+.idea/
+supabase/.temp/
+supabase/.branches/
+coverage
+tsconfig.tsbuildinfo
+# Bundled HTML exports keep locally
+Voice Calendar*.html
+*.zip
+landing/

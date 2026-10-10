@@ -1,0 +1,65 @@
+# The Rocky app is no longer published to GitHub Pages.
+#
+# This repo used to build the full app and deploy it here, which meant anyone
+# with the URL could use Rocky in their browser. The app is pre-release, so the
+# public face is now the landing page (hosted on Vercel) and this workflow only
+# publishes a redirect so the old link doesn't dead-end.
+#
+# To take the site down completely instead: GitHub → Settings → Pages → disable.
+name: Redirect Pages to the landing site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Set this to the Vercel URL once the landing site is deployed.
+      LANDING_URL: https://rocky.vercel.app
+    steps:
+      - name: Build redirect stub
+        run: |
+          mkdir -p out
+          cat > out/index.html <<HTML
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Rocky</title>
+              <meta http-equiv="refresh" content="0; url=${LANDING_URL}" />
+              <link rel="canonical" href="${LANDING_URL}" />
+            </head>
+            <body style="margin:0;background:#F4F3F0;color:#17191A;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif">
+              <p style="padding:48px">Rocky has moved to <a href="${LANDING_URL}">${LANDING_URL}</a>.</p>
+            </body>
+          </html>
+          HTML
+          cp out/index.html out/404.html
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

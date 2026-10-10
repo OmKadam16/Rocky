@@ -1,0 +1,86 @@
+{
+  "name": "rocky-calendar",
+  "productName": "Rocky",
+  "private": true,
+  "version": "0.1.14",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "build:electron": "ELECTRON=1 tsc -b && ELECTRON=1 vite build",
+    "electron:dev": "npm run build:electron && electron .",
+    "build:mac": "npm run build:electron && electron-builder --mac",
+    "install:app": "npm run build:mac && scripts/install-local.sh",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
+    "dexie": "^4.4.5",
+    "electron-updater": "^6.8.9",
+    "jsqr": "^1.4.0",
+    "openai": "^7.5.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.128.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/electron-builder": "^2.0.29",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.185.4",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.3"
+  },
+  "main": "electron/main.cjs",
+  "description": "Voice-driven personal calendar",
+  "build": {
+    "appId": "com.rocky.calendar",
+    "productName": "Rocky",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "darkModeSupport": true,
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Rocky listens when you tap the mic so you can talk to your calendar."
+      },
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "title": "Rocky"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "OmKadam16",
+        "repo": "rocky-releases"
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+# Render blueprint: Rocky as a static web app (laptop browser + phone).
+# The phone mic and camera need HTTPS, which Render provides.
+services:
+  - type: web
+    name: rocky
+    env: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false

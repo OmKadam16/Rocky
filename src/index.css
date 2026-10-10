@@ -1,0 +1,242 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens — lifted verbatim from the exported design
+   (Voice Calendar.dc.html). Do not "round" these values.
+--------------------------------------------------------------------------- */
+@theme {
+  --font-sans: "Space Grotesk", Helvetica, sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  /* surfaces */
+  --color-canvas: #f4f3f0;
+  --color-panel: #fbfaf8;
+  --color-card: #ffffff;
+  --color-done: #f0eee9;
+  --color-sidebar: #f1efeb;
+  --color-block: #f1efe9;
+
+  /* ink + greys, darkest → lightest */
+  --color-ink: #17191a;
+  --color-ink-soft: #3a3733;
+  --color-ink-muted: #6e6b65;
+  --color-grey: #8b887f;
+  --color-grey-mid: #a5a29a;
+  --color-grey-soft: #b0ada4;
+  --color-grey-faint: #b8b5ac;
+  --color-grey-ghost: #c0bdb4;
+
+  /* rules + borders */
+  --color-line: #e2dfd8;
+  --color-line-grid: #e7e4de;
+  --color-line-block: #e4e1da;
+  --color-line-panel: #edeae4;
+  --color-line-strong: #d6d2ca;
+  --color-line-scroll: #dddad3;
+
+  /* accent (green) */
+  --color-accent: #3f9e7c;
+  --color-accent-deep: #2f7a61;
+  --color-accent-dark: #1f5b47;
+  --color-accent-soft: #6e8a7e;
+  --color-accent-bg: #e9f2ed;
+  --color-accent-bg-week: #e4f0ea;
+  --color-accent-line: #c8e1d6;
+
+  /* pastels */
+  --color-pastel-magenta: #fce6ee;
+  --color-pastel-magenta-line: #f2b8cc;
+  --color-pastel-orange: #ffecd6;
+  --color-pastel-orange-line: #f5c9a3;
+  --color-pastel-green: #d9f2e6;
+  --color-pastel-green-line: #bfe0cc;
+  --color-pastel-red: #ffe0e0;
+  --color-pastel-red-line: #f5b8b8;
+  --color-pastel-blue: #dceeff;
+  --color-pastel-blue-line: #bdd7f5;
+  --color-pastel-lavender: #e9e4f5;
+  --color-pastel-lavender-line: #d0c8e8;
+
+  /* warm + course course colors (assignments) */
+  --color-warm: #b07a3c;
+  --color-warm-soft: #f4ede3;
+  --color-warm-line: #e3d3bc;
+  --color-c-a: #4f8a73;
+  --color-c-b: #8a6e4f;
+  --color-c-c: #5e7391;
+  --color-c-d: #8a5f6b;
+
+  /* type scale (px values as used in the design) */
+  --text-display: 62px;
+  --text-display--line-height: 1.02;
+  --text-display-wk: 52px;
+  --text-display-fixed: 46px;
+  --text-display-wk--line-height: 1.04;
+  --text-display-fixed--line-height: 1.06;
+  --text-input: 18px;
+  --text-lead: 17px;
+  --text-body: 16px;
+  --text-15: 15px;
+  --text-14: 14px;
+  --text-event: 13.5px;
+  --text-13: 13px;
+  --text-12: 12px;
+  --text-hint: 11.5px;
+  --text-label: 11px;
+  --text-meta: 10.5px;
+  --text-micro: 10px;
+  --text-nano: 9.5px;
+
+  /* letter-spacing steps used by the mono labels */
+  --tracking-wordmark: 0.18em;
+  --tracking-label: 0.16em;
+  --tracking-tab: 0.14em;
+  --tracking-tag: 0.12em;
+  --tracking-gap: 0.1em;
+  --tracking-days: 0.06em;
+
+  /* motion */
+  --animate-vcbar: vcbar 0.9s ease-in-out infinite;
+  --animate-vcbreathe: vcbreathe 3.6s ease-in-out infinite;
+  --animate-vcpulse: vcpulse 2.4s ease-in-out infinite;
+  --animate-vcin: vcin 0.4s ease both;
+}
+
+@keyframes vcbar {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+/* Idle mic: slow breathing on the circle and a lazy sway on the bars. */
+@keyframes vcbreathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.045);
+  }
+}
+@keyframes vcbreathe-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  70%,
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+@keyframes vcbar-idle {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(0.78);
+  }
+}
+/* Listening: a fast ring and reactive bars. */
+@keyframes vcring {
+  0% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+@keyframes vcpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes vcin {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+html[data-theme="dark"] {
+  --color-canvas: #131415;
+  --color-panel: #191a1b;
+  --color-card: #1c1e1f;
+  --color-done: #202223;
+  --color-sidebar: #0f1011;
+  --color-block: #1c1e1f;
+  --color-ink: #efeeea;
+  --color-ink-soft: #cbc8c2;
+  --color-ink-muted: #9c9891;
+  --color-grey: #85827b;
+  --color-grey-mid: #74716b;
+  --color-grey-soft: #6a6762;
+  --color-grey-faint: #605d58;
+  --color-grey-ghost: #57544f;
+  --color-line: #2b2d2e;
+  --color-line-grid: #232526;
+  --color-line-block: #2e3031;
+  --color-line-panel: #232526;
+  --color-line-strong: #3b3d3e;
+  --color-line-scroll: #3b3d3e;
+  --color-accent: #4fb08c;
+  --color-accent-deep: #6fc7a4;
+  --color-accent-dark: #8fd3b6;
+  --color-accent-soft: #7fa593;
+  --color-accent-bg: #16281f;
+  --color-accent-bg-week: #16281f;
+  --color-accent-line: #274f3f;
+  --color-pastel-magenta: #3a2430;
+  --color-pastel-magenta-line: #5a3448;
+  --color-pastel-orange: #3b2e22;
+  --color-pastel-orange-line: #5d4430;
+  --color-pastel-green: #1e2f26;
+  --color-pastel-green-line: #2e4a3a;
+  --color-pastel-red: #3d2222;
+  --color-pastel-red-line: #5e3434;
+  --color-pastel-blue: #1f2a3a;
+  --color-pastel-blue-line: #30465e;
+  --color-pastel-lavender: #2a2440;
+  --color-pastel-lavender-line: #3e355e;
+  --color-warm: #d2a063;
+  --color-warm-soft: #27200f;
+  --color-warm-line: #4a3c22;
+  --color-c-a: #6fb99b;
+  --color-c-b: #be9a6e;
+  --color-c-c: #8aa3c4;
+  --color-c-d: #c08a98;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background 0.25s ease,
+    color 0.25s ease;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line-scroll);
+  border-radius: 3px;
+}

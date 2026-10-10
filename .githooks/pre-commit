@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+#
+# Blocks a commit that contains credentials.
+#
+# This exists because an earlier commit in the app repo shipped a live OpenAI
+# key and an ElevenLabs key, base64-encoded, inside the source. Base64 is not
+# encryption, so the scan below decodes candidate blobs and checks those too.
+#
+# Bypass (only when you are certain): git commit --no-verify
+
+set -uo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+note() { printf '  %s\n' "$1"; }
+header() { [ "$fail" -eq 0 ] && echo "BLOCKED: credentials in staged changes"; }
+
+# 1. Never commit an env file.
+for f in $staged; do
+  case "$f" in
+    .env|.env.*|*/.env|*/.env.*)
+      if [ "${f##*/}" != ".env.example" ]; then
+        header
+        note "$f is an environment file — keep it out of git"
+        fail=1
+      fi
+      ;;
+  esac
+done
+
+# 2. Literal credentials in the staged diff.
+diff_file=$(mktemp)
+git diff --cached -U0 > "$diff_file"
+
+check() {
+  local label="$1" pattern="$2" hits
+  hits=$(grep -nE "^\+.*$pattern" "$diff_file" | head -3)
+  if [ -n "$hits" ]; then
+    header
+    note "$label"
+    printf '%s\n' "$hits" | cut -c1-110 | sed 's/^/      /'
+    fail=1
+  fi
+}
+
+check "OpenAI key"           'sk-(proj-)?[A-Za-z0-9_-]{20,}'
+check "ElevenLabs key"       'sk_[a-f0-9]{32,}'
+check "Anthropic key"        'sk-ant-[A-Za-z0-9_-]{20,}'
+check "AWS access key"       'AKIA[0-9A-Z]{16}'
+check "JWT (Supabase, etc.)" 'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}'
+check "Private key block"    'BEGIN [A-Z ]*PRIVATE KEY'
+check "GitHub token"         'gh[pousr]_[A-Za-z0-9]{30,}'
+
+# 3. Base64 blobs that decode to a credential — the trick that leaked before.
+# The diff is passed as a file path: a heredoc would otherwise take over the
+# script's stdin and it would scan itself instead of the diff.
+encoded=$(python3 - "$diff_file" <<'PY'
+import base64, re, sys
+
+text = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
+credential = re.compile(
+    r"sk-(proj-)?[A-Za-z0-9_-]{20,}"
+    r"|sk_[a-f0-9]{32,}"
+    r"|sk-ant-[A-Za-z0-9_-]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.eyJ"
+)
+seen = set()
+for blob in re.findall(r"[A-Za-z0-9+/]{40,}={0,2}", text):
+    if blob in seen:
+        continue
+    seen.add(blob)
+    try:
+        decoded = base64.b64decode(blob + "=" * (-len(blob) % 4)).decode("utf-8", "ignore")
+    except Exception:
+        continue
+    if credential.search(decoded):
+        print(blob[:32] + "... decodes to a credential")
+PY
+)
+
+rm -f "$diff_file"
+
+if [ -n "$encoded" ]; then
+  header
+  note "base64-encoded credential"
+  printf '%s\n' "$encoded" | sed 's/^/      /'
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "  Rotate anything real that appeared above, then unstage it."
+  exit 1
+fi
+exit 0
