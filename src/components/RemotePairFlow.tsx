@@ -201,6 +201,18 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
       let last = 0;
+      const attempt = (dw: number, dh: number, sx: number, sy: number, sw: number, sh: number) => {
+        canvas.width = dw;
+        canvas.height = dh;
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+        const img = ctx.getImageData(0, 0, dw, dh);
+        const out = jsQR(img.data, img.width, img.height, { inversionAttempts: "attemptBoth" });
+        if (out?.data) {
+          handleDetectedText(out.data);
+          return true;
+        }
+        return false;
+      };
       scanTimer.current = window.setInterval(() => {
         const now = Date.now();
         if (now - last < 400) return;
@@ -209,13 +221,15 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
           const w = video.videoWidth;
           const h = video.videoHeight;
           if (!w || !h) return;
+          // Whole frame, downscaled for speed.
           const scale = Math.min(1, 480 / Math.max(w, h));
-          canvas.width = Math.floor(w * scale);
-          canvas.height = Math.floor(h * scale);
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const out = jsQR(img.data, img.width, img.height);
-          if (out?.data) handleDetectedText(out.data);
+          if (attempt(Math.floor(w * scale), Math.floor(h * scale), 0, 0, w, h)) return;
+          // Center crop near-native resolution: screens render small QRs
+          // that downscaling can destroy (moiré, thin modules).
+          const side = Math.floor(Math.min(w, h) * 0.7);
+          const cw = Math.min(side, 720);
+          const ch = Math.min(side, 720);
+          attempt(cw, ch, Math.floor((w - side) / 2), Math.floor((h - side) / 2), side, side);
         } catch {
           /* keep scanning */
         }
