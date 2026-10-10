@@ -72,6 +72,11 @@ describe("QR payload (SPA rewrite)", () => {
     expect(parsePairParam("")).toBeNull();
   });
 
+  it("round-trips: the built QR payload decodes back to the stored code", () => {
+    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com", "K7P2QM"))).toBe("K7P2QM");
+    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com/", "k7p-2qm"))).toBe("K7P2QM");
+  });
+
   it("extracts codes from scanned QR text (URL or raw)", () => {
     expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P2QM")).toBe("K7P2QM");
     expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P-2QM&x=1")).toBe("K7P2QM");

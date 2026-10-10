@@ -49,6 +49,8 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   const [torch, setTorch] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
+  const [scanHint, setScanHint] = useState(false);
+  const insecureContext = typeof window !== "undefined" && window.isSecureContext === false;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimer = useRef<number | null>(null);
@@ -96,6 +98,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
       if (next !== "scanner") stopCamera();
       setCamError(null);
       setGenericMsg(null);
+      setScanHint(false);
       setState(next);
     },
     [stopCamera],
@@ -190,26 +193,9 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
     [stopCamera, submitCode],
   );
 
-  const startScanLoop = useCallback(
+  const startJsQrLoop = useCallback(
     (video: HTMLVideoElement) => {
-      const Native = window.BarcodeDetector;
-      if (Native) {
-        try {
-          const det = new Native({ formats: ["qr_code"] });
-          scanTimer.current = window.setInterval(async () => {
-            try {
-              const found = await det.detect(video);
-              const raw = found?.[0]?.rawValue;
-              if (raw) handleDetectedText(raw);
-            } catch {
-              /* keep scanning */
-            }
-          }, 350);
-          return;
-        } catch {
-          /* fall through to jsQR */
-        }
-      }
+      if (scanTimer.current) return;
       // Fallback: small JS QR decoder (jsQR) over video frames.
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -238,16 +224,76 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
     [handleDetectedText],
   );
 
+  const startScanLoop = useCallback(
+    (video: HTMLVideoElement) => {
+      if (scanTimer.current) return;
+      const Native = window.BarcodeDetector;
+      if (Native) {
+        try {
+          const det = new Native({ formats: ["qr_code"] });
+          let failures = 0;
+          scanTimer.current = window.setInterval(async () => {
+            try {
+              const found = await det.detect(video);
+              failures = 0;
+              const raw = found?.[0]?.rawValue;
+              if (raw) handleDetectedText(raw);
+            } catch {
+              // A detector that always throws is worse than none:
+              // fall back to jsQR instead of scanning blind forever.
+              failures += 1;
+              if (failures >= 8) {
+                if (scanTimer.current) window.clearInterval(scanTimer.current);
+                scanTimer.current = null;
+                startJsQrLoop(video);
+              }
+            }
+          }, 350);
+          return;
+        } catch {
+          /* fall through to jsQR */
+        }
+      }
+      startJsQrLoop(video);
+    },
+    [handleDetectedText, startJsQrLoop],
+  );
+
   const openScanner = useCallback(async () => {
     setCamError(null);
+    setScanHint(false);
+    // Phone cameras need a secure context. LAN http:// addresses are not
+    // secure, so getUserMedia is missing there — say so plainly instead of
+    // failing into a generic error.
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      setCamError("This page isn't on HTTPS, so the camera is blocked. Open the Render link on this phone instead — or type the code, which pairs the same account.");
+      setState("camPrimer");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError("This browser can't open the camera here. Type the code instead — it pairs the same account.");
+      setState("camPrimer");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
       streamRef.current = stream;
       setState("scanner");
-      requestAnimationFrame(() => {
+      // If nothing decodes for a while, say so — a silent viewfinder teaches nothing.
+      window.setTimeout(() => {
+        if (stateRef.current === "scanner") setScanHint(true);
+      }, 12000);
+      // Attach once the video element is actually mounted and playing; a
+      // single rAF can fire before mount and leave the camera running blind.
+      let tries = 0;
+      const attach = () => {
         const v = videoRef.current;
-        if (!v) return;
-        v.srcObject = stream;
+        if (!v) {
+          if (tries++ < 20) requestAnimationFrame(attach);
+          return;
+        }
+        if (v.srcObject !== stream) v.srcObject = stream;
+        v.onplaying = () => startScanLoop(v);
         void v.play().catch(() => {});
         const track = stream.getVideoTracks()[0];
         try {
@@ -256,8 +302,12 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
         } catch {
           setTorchSupported(false);
         }
-        startScanLoop(v);
-      });
+        // Belt and braces: if playing never fires, still start the loop.
+        window.setTimeout(() => {
+          if (videoRef.current === v && !scanTimer.current) startScanLoop(v);
+        }, 2500);
+      };
+      requestAnimationFrame(attach);
     } catch (e) {
       const name = e instanceof Error ? e.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
@@ -286,7 +336,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   })();
 
   const errMeta: Record<string, { title: string; body: string }> = {
-    expired: { title: "That code expired", body: "Codes last 5 minutes. On your laptop tap Generate new code, then scan again." },
+    expired: { title: "That code isn't active", body: "Check the code on the laptop (Profile → Devices) and try again — each account has one code that doesn't change." },
     wrong: { title: "Different account", body: "This phone must be signed in with the same account as your laptop." },
     offline: { title: "Can't reach your laptop", body: "Your laptop is offline or Rocky isn’t running. Open it, start Rocky, and try again." },
   };
@@ -338,6 +388,11 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
                 ? "To scan the code, allow camera access for this site. Or type the 6-character code instead."
                 : "Only to scan the pairing code on your laptop. Rocky doesn't take photos or keep video."}
             </p>
+            {insecureContext && !denied && (
+              <p className="mt-2 max-w-[340px] font-mono text-[11px] leading-[1.5] text-warm">
+                You're on http, so the camera will stay blocked. Open the Render (https) link on this phone — or just type the code.
+              </p>
+            )}
             {camError && <p className="mt-2 font-mono text-[11px] text-warm">{camError}</p>}
           </div>
           <div className="flex-1" />
@@ -354,9 +409,14 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
 
       {state === "scanner" && (
         <div className="relative -mx-5 flex flex-1 flex-col overflow-hidden bg-ink">
-          <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" aria-label="Camera viewfinder" />
+          <video ref={videoRef} playsInline muted autoPlay className="absolute inset-0 h-full w-full object-cover" aria-label="Camera viewfinder" />
           <div className="relative flex flex-1 flex-col items-center px-5 pb-6 pt-8">
             <p className="font-mono text-[11px] tracking-tab uppercase text-canvas">Point at the QR on your laptop</p>
+            {scanHint && (
+              <p className="mt-2 max-w-[280px] text-center font-mono text-[11px] leading-[1.5] text-canvas">
+                Still nothing? Hold steady in good light — or type the code instead, it pairs the same account.
+              </p>
+            )}
             <div className="relative mt-6 h-[270px] w-[270px]">
               <span className="absolute left-0 top-0 h-12 w-12 rounded-tl-[16px] border-l-4 border-t-4 border-canvas" />
               <span className="absolute right-0 top-0 h-12 w-12 rounded-tr-[16px] border-r-4 border-t-4 border-canvas" />
