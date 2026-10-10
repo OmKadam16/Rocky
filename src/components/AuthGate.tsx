@@ -5,6 +5,7 @@ import { SessionContext } from "../hooks/useAuth";
 import { usingCloud } from "../lib/db";
 import { supabase } from "../lib/supabase";
 import { startRealtime, stopRealtime } from "../lib/supaDb";
+import { shouldShowMobileUi } from "../lib/isMobile";
 
 type State =
   | { kind: "checking" }
@@ -103,7 +104,8 @@ function CloudGate({ children }: { children: ReactNode }) {
     );
   }
   if (state.kind === "signedOut") {
-    const compact = typeof window !== "undefined" && window.location.pathname === "/remote";
+    const compact =
+      typeof window !== "undefined" && shouldShowMobileUi(window.location.pathname);
     return (
       <div className="relative h-screen bg-canvas text-ink">
         <AuthScreen notice={state.notice} compact={compact} />
