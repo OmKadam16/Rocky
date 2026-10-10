@@ -107,18 +107,27 @@ describe("fresh project: all migrations in order", () => {
   });
 
   it("keeps claim_pair working (devices from 0002)", async () => {
-    await as(db, ALICE, (q) => q(`insert into public.devices (role, name, pair_code, pair_expires_at) values ('laptop', 'Laptop', 'ABCDEF', now() + interval '5 minutes')`));
-    const r = (await as(db, ALICE, (q) => q(`select public.claim_pair('ABC-DEF', 'Phone') as r`))) as { r: { laptop_name: string } }[];
+    await as(db, ALICE, (q) => q(`insert into public.devices (role, name, pair_code, pair_expires_at) values ('laptop', 'Laptop', 'ABCDEFGH', now() + interval '5 minutes')`));
+    const r = (await as(db, ALICE, (q) => q(`select public.claim_pair('ABCD-EFGH', 'Phone') as r`))) as { r: { laptop_name: string } }[];
     expect(r[0].r.laptop_name).toBe("Laptop");
-    await expect(as(db, BOB, (q) => q(`select public.claim_pair('ABCDEF')`))).rejects.toThrow();
+    await expect(as(db, BOB, (q) => q(`select public.claim_pair('ABCDEFGH')`))).rejects.toThrow();
   });
 
   it("keeps static pair codes across claims (0003: no single-use clear)", async () => {
-    const r2 = (await as(db, ALICE, (q) => q(`select public.claim_pair('ABCDEF', 'Phone 2') as r`))) as { r: { laptop_name: string } }[];
+    const r2 = (await as(db, ALICE, (q) => q(`select public.claim_pair('ABCDEFGH', 'Phone 2') as r`))) as { r: { laptop_name: string } }[];
     expect(r2[0].r.laptop_name).toBe("Laptop");
     expect(await as(db, ALICE, (q) => q("select pair_code from public.devices where role = 'laptop'"))).toEqual([
-      { pair_code: "ABCDEF" },
+      { pair_code: "ABCDEFGH" },
     ]);
+  });
+
+  it("still accepts legacy 6-char codes (0004: 6 or 8 chars)", async () => {
+    await as(db, BOB, (q) => q(`insert into public.devices (role, name, pair_code, pair_expires_at) values ('laptop', 'Laptop', 'ABCDEF', now() + interval '5 minutes')`));
+    const r = (await as(db, BOB, (q) => q(`select public.claim_pair('ABC-DEF', 'Phone') as r`))) as { r: { laptop_name: string } }[];
+    expect(r[0].r.laptop_name).toBe("Laptop");
+    await expect(
+      as(db, BOB, (q) => q(`update public.devices set pair_code = 'ABCDE', pair_expires_at = now() where role = 'phone'`)),
+    ).rejects.toThrow(/pair_code/);
   });
 });
 

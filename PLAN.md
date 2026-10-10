@@ -50,13 +50,15 @@ Migrations in `supabase/migrations/`, tested by `supabase/tests/migrations.test.
 - `0002_devices_commands.sql`: `devices`, `commands`, `claim_pair` RPC (SECURITY DEFINER),
   `voice-clips` storage bucket.
 - `0003_claim_pair_static.sql`: `claim_pair` keeps the laptop row's code on success —
-  one static QR per user. Apply to the live project by hand (SQL editor).
+  one static code per user. Apply to the live project by hand (SQL editor).
+- `0004_devices_pair_code_8.sql`: pair codes are 8 Crockford chars (`XXXX-XXXX`;
+  legacy 6-char rows still accepted). Apply to the live project by hand (SQL editor).
 
 Rules:
 - Fixed commitments never move. Only flexible tasks/blocks get rescheduled.
 - API keys (`llm_key_enc`, `el_key_enc`) sync per user through the profile row's `extra`
   column (one key for all of a user's devices; RLS "own rows only" scopes them).
-  Claiming still needs the account's own session, so a leaked QR alone grants nothing.
+  Claiming still needs the account's own session, so a leaked code alone grants nothing.
   Leak response: hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys
   everywhere + revoke at the provider dashboards).
 - Any schema change = a new numbered migration + a test in `migrations.test.ts` + a note here.
@@ -71,9 +73,10 @@ Rules:
       model with one-click download) → your day (text, voice or photos, analyzed into
       commitments) → commitments → dashboard. Resumes where you left off.
 - [x] Emails feature fully removed.
-- [x] Phone remote: laptop shows one static QR + 6-char code (XXX-XXX) in Profile → Devices;
-      phone opens `/remote`, signs in or pairs, sees the calendar, talks to Rocky with the
-      account's shared keys (phone keys card removed).
+- [x] Phone remote: laptop shows one static 8-char code (XXXX-XXXX, no QR) in Profile → Devices;
+      phone opens `/remote`, signs in, enters the code, sees the calendar, talks to Rocky with the
+      account's shared keys (phone keys card removed). Visible Rotate code disconnects the
+      phone (it must enter the new code); hidden 5-tap panel still holds key wipe.
 - [x] Memory page UI (`src/pages/MemoryPage.tsx`), model check/download via Ollama.
 - [x] Everything consolidated into `OmKadam16/Rocky` main. `tsc`, 42 tests and build pass.
 
@@ -95,8 +98,9 @@ Goal: the phone works over HTTPS (mic and camera need HTTPS).
    and `VITE_SUPABASE_ANON_KEY` in Render.
 2. In Supabase → Auth → URL configuration: add the Render URL as Site URL and redirect URL
    (keep `http://localhost:8080`).
-3. Make sure the pairing QR code points to the **deployed** URL, not localhost
-   (use `window.location.origin`, or a `VITE_PUBLIC_URL` if set).
+3. Pairing is code-only (no QR): the laptop shows its static 8-char code in
+   Profile → Devices; the phone enters it at `/remote`. Rotating the code on
+   the laptop disconnects the phone until it enters the new one.
 4. Test on a real Android phone: open `/remote`, pair with the laptop code, see the calendar,
    say "add gym tomorrow at 7pm", see it appear on the laptop within a few seconds.
 5. Fix anything that breaks. Note phone model + browser in the report.
@@ -173,4 +177,8 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Phones now land on the mobile UI (calendar + talk) on any path, not just `/remote` (`shouldShowMobileUi`, tested; verified at 390px with no overflow). Desktop browsers unchanged.
 - 2026-10-10: One key per user shared across devices (keys sync via profile `extra`, phone keys card removed); one static QR per user (`0003_claim_pair_static.sql`, no single-use clear, far-future expiry); hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys everywhere). Apply 0003 to the live project by hand.
 - 2026-10-10: QR scan hardening (phone couldn't scan while typed codes worked): plain-English insecure-context guard (LAN http blocks the camera — points to the Render link), video attach retries on `playing` event, BarcodeDetector failure fallback to jsQR, 12s no-decode hint, fixed stale expiry copy.
-- 2026-10-10: QR decode round-trip proven (the exact `qrcode.react` output decodes to the exact pair URL); both decoders now run in parallel so an empty native result can never block jsQR.
+- 2026-10-10: QR decode round-trip proven (the exact `qrcode.react` output decodes to the exact pair URL);
+  both decoders now run in parallel so an empty native result can never block jsQR.
+- 2026-10-10: QR removed entirely (scanner never worked on-device): pairing is code-only with
+  static 8-char codes (`XXXX-XXXX`, `0004` accepts legacy 6-char rows); visible Rotate code
+  disconnects the phone until it enters the new code; `qrcode.react`/`jsqr` deps removed.

@@ -15,29 +15,38 @@ import {
   shouldReusePairCode,
 } from "./pairing";
 
-describe("pairing codes (6 Crockford chars, stored without dash)", () => {
-  it("generates 6-char codes from the Crockford alphabet", () => {
+describe("pairing codes (8 Crockford chars, stored without dash)", () => {
+  it("generates 8-char codes from the Crockford alphabet", () => {
     for (let i = 0; i < 50; i++) {
       const c = generatePairCode();
-      expect(c).toHaveLength(6);
+      expect(c).toHaveLength(8);
       expect(isValidPairCode(c)).toBe(true);
       expect(c).not.toContain("-");
       expect(c).not.toMatch(/[01ILO]/);
     }
   });
 
-  it("formats stored XXXYYY as XXX-XXX for display", () => {
+  it("formats stored XXXXYYYY as XXXX-YYYY for display", () => {
+    expect(formatPairCode("K7P2QMX9")).toBe("K7P2-QMX9");
+  });
+
+  it("still shows legacy 6-char codes as XXX-XXX", () => {
     expect(formatPairCode("K7P2QM")).toBe("K7P-2QM");
   });
 
   it("accepts codes with or without the dash", () => {
-    expect(normalizePairCode("k7p-2qm")).toBe("K7P2QM");
-    expect(normalizePairCode("K7P 2QM")).toBe("K7P2QM");
+    expect(normalizePairCode("k7p2-qmx9")).toBe("K7P2QMX9");
+    expect(normalizePairCode("K7P2 QMX9")).toBe("K7P2QMX9");
+    expect(isValidPairCode("K7P2-QMX9")).toBe(true);
+    expect(isValidPairCode("K7P2QMX9")).toBe(true);
+    expect(isValidPairCode("K7P2QMX")).toBe(false);
+    expect(isValidPairCode("K7P2-QMX9!")).toBe(true); // punctuation stripped
+    expect(isValidPairCode("")).toBe(false);
+  });
+
+  it("still accepts legacy 6-char codes during the transition", () => {
     expect(isValidPairCode("K7P-2QM")).toBe(true);
     expect(isValidPairCode("K7P2QM")).toBe(true);
-    expect(isValidPairCode("K7P2Q")).toBe(false);
-    expect(isValidPairCode("K7P-2QM!")).toBe(true); // punctuation stripped
-    expect(isValidPairCode("")).toBe(false);
   });
 
   it("expires after 5 minutes", () => {
@@ -58,39 +67,40 @@ describe("pairing codes (6 Crockford chars, stored without dash)", () => {
   });
 });
 
-describe("QR payload (SPA rewrite)", () => {
+describe("pair payload (SPA rewrite)", () => {
   it("builds https://<site>/remote?pair=<CODE> without dash", () => {
-    expect(buildPairUrl("https://rocky.vercel.app", "K7P2QM")).toBe("https://rocky.vercel.app/remote?pair=K7P2QM");
-    expect(buildPairUrl("https://rocky.vercel.app/", "K7P2QM")).toBe("https://rocky.vercel.app/remote?pair=K7P2QM");
+    expect(buildPairUrl("https://rocky.vercel.app", "K7P2QMX9")).toBe("https://rocky.vercel.app/remote?pair=K7P2QMX9");
+    expect(buildPairUrl("https://rocky.vercel.app/", "K7P2QMX9")).toBe("https://rocky.vercel.app/remote?pair=K7P2QMX9");
   });
 
   it("parses ?pair= with or without dash", () => {
-    expect(parsePairParam("?pair=K7P2QM")).toBe("K7P2QM");
-    expect(parsePairParam("?pair=K7P-2QM")).toBe("K7P2QM");
-    expect(parsePairParam("?pair=k7p-2qm")).toBe("K7P2QM");
+    expect(parsePairParam("?pair=K7P2QMX9")).toBe("K7P2QMX9");
+    expect(parsePairParam("?pair=K7P2-QMX9")).toBe("K7P2QMX9");
+    expect(parsePairParam("?pair=k7p2-qmx9")).toBe("K7P2QMX9");
     expect(parsePairParam("?pair=XY")).toBeNull();
     expect(parsePairParam("")).toBeNull();
   });
 
-  it("round-trips: the built QR payload decodes back to the stored code", () => {
-    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com", "K7P2QM"))).toBe("K7P2QM");
-    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com/", "k7p-2qm"))).toBe("K7P2QM");
+  it("round-trips: the built payload decodes back to the stored code", () => {
+    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com", "K7P2QMX9"))).toBe("K7P2QMX9");
+    expect(extractPairFromQrText(buildPairUrl("https://rocky-kfa8.onrender.com/", "k7p2-qmx9"))).toBe("K7P2QMX9");
   });
 
-  it("extracts codes from scanned QR text (URL or raw)", () => {
-    expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P2QM")).toBe("K7P2QM");
-    expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P-2QM&x=1")).toBe("K7P2QM");
-    expect(extractPairFromQrText("K7P-2QM")).toBe("K7P2QM");
-    expect(extractPairFromQrText("k7p2qm")).toBe("K7P2QM");
+  it("extracts codes from pasted text (URL or raw)", () => {
+    expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P2QMX9")).toBe("K7P2QMX9");
+    expect(extractPairFromQrText("https://rocky.vercel.app/remote?pair=K7P2-QMX9&x=1")).toBe("K7P2QMX9");
+    expect(extractPairFromQrText("K7P2-QMX9")).toBe("K7P2QMX9");
+    expect(extractPairFromQrText("k7p2qmX9".toLowerCase())).toBe("K7P2QMX9");
     expect(extractPairFromQrText("hello world")).toBeNull();
     expect(extractPairFromQrText("")).toBeNull();
   });
 });
 
-describe("static pair codes (one QR per user)", () => {
+describe("static pair codes (one code per user)", () => {
   it("reuses any valid existing code, generates only when absent", () => {
-    expect(shouldReusePairCode("K7P2QM")).toBe(true);
-    expect(shouldReusePairCode("k7p-2qm")).toBe(true);
+    expect(shouldReusePairCode("K7P2QMX9")).toBe(true);
+    expect(shouldReusePairCode("k7p2-qmx9")).toBe(true);
+    expect(shouldReusePairCode("K7P2QM")).toBe(true); // legacy 6-char rows
     expect(shouldReusePairCode(null)).toBe(false);
     expect(shouldReusePairCode("")).toBe(false);
     expect(shouldReusePairCode("XY")).toBe(false);

@@ -6,11 +6,11 @@
  *   devices(id, user_id, role laptop|phone, name, last_seen,
  *           pair_code, pair_expires_at)
  *   QR payload: https://<site>/remote?pair=<CODE> (SPA rewrite)
- *   Code: 6 Crockford chars, STORED without dash, SHOWN as XXX-XXX,
- *         accepted with or without the dash.
+ *   Code: 8 Crockford chars, STORED without dash, SHOWN as XXXX-XXXX,
+ *         accepted with or without the dash (legacy 6-char codes still accepted).
  */
 
-export const PAIR_CODE_LEN = 6;
+export const PAIR_CODE_LEN = 8;
 export const PAIR_EXPIRY_MIN = 5;
 export const PAIR_EXPIRY_SEC = PAIR_EXPIRY_MIN * 60;
 /**
@@ -31,9 +31,6 @@ export type LaptopPairStatus = "waiting" | "confirming" | "connected" | "expired
 
 export type PhonePairState =
   | "intro"
-  | "camPrimer"
-  | "camDenied"
-  | "scanner"
   | "code"
   | "confirming"
   | "connected"
@@ -74,11 +71,12 @@ export function generateSecurePairCode(): string {
   return out;
 }
 
-/** Display form: XXX-XXX. */
+/** Display form: XXXX-XXXX (legacy 6-char codes show as XXX-XXX). */
 export function formatPairCode(stored: string): string {
   const n = normalizePairCode(stored);
-  if (n.length !== PAIR_CODE_LEN) return stored.toUpperCase();
-  return `${n.slice(0, 3)}-${n.slice(3)}`;
+  if (n.length === 8) return `${n.slice(0, 4)}-${n.slice(4)}`;
+  if (n.length === 6) return `${n.slice(0, 3)}-${n.slice(3)}`;
+  return stored.toUpperCase();
 }
 
 /** Normalize user input: uppercase, drop dashes/spaces. Stored form. */
@@ -88,7 +86,8 @@ export function normalizePairCode(input: string): string {
 
 export function isValidPairCode(input: string): boolean {
   const n = normalizePairCode(input);
-  if (n.length !== PAIR_CODE_LEN) return false;
+  // 8 chars current; legacy 6-char codes stay accepted during the transition.
+  if (n.length !== PAIR_CODE_LEN && n.length !== 6) return false;
   return [...n].every((c) => CROCKFORD.includes(c));
 }
 

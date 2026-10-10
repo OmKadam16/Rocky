@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase, uniqueChannel } from "../lib/supabase";
 import { setSecret } from "../lib/secrets";
 import {
@@ -12,12 +11,10 @@ import {
   type PairError,
 } from "../lib/devices";
 import {
-  buildPairUrl,
   defaultLaptopName,
   farFuturePairExpiry,
   formatPairCode,
   generateSecurePairCode,
-  resolvePairOrigin,
   shouldReusePairCode,
 } from "../lib/pairing";
 import { detectPairClaim } from "../lib/pairClaim";
@@ -29,7 +26,7 @@ const ROTATE_TAPS_NEEDED = 5;
 const ROTATE_TAPS_WINDOW_MS = 2000;
 
 const STATUS_COPY: Record<Status, { title: string; body: string }> = {
-  waiting: { title: "Waiting for your phone", body: "Scan this code with Rocky on your phone. This code is yours and doesn't change." },
+  waiting: { title: "Waiting for your phone", body: "Enter this code on your phone under Remote. This code is yours and doesn't change." },
   confirming: { title: "Phone found", body: "Finishing pairing…" },
   connected: { title: "You're connected", body: "Your phone is paired. Say something on your phone to test it." },
   offline: { title: "Can't reach the relay", body: "Check your connection and retry." },
@@ -37,8 +34,8 @@ const STATUS_COPY: Record<Status, { title: string; body: string }> = {
 
 /**
  * Laptop Profile → Devices section, in v1 visual language.
- * One static QR per user: the laptop row's code is reused forever and only
- * changes via the hidden rotate panel. Claim detection via Realtime + 2 s
+ * One static 8-char code per user (no QR): the laptop row's code is reused
+ * forever and only changes via Rotate. Claim detection via Realtime + 2 s
  * poll (a fresh phone row after this code's creation).
  */
 export default function DevicesSection() {
@@ -68,12 +65,6 @@ export default function DevicesSection() {
   const laptopNameRef = useRef(laptopName);
   laptopNameRef.current = laptopName;
 
-  const siteOrigin = useMemo(
-    () => resolvePairOrigin(import.meta.env.VITE_PUBLIC_URL as string | undefined, window.location.origin),
-    [],
-  );
-  const pairUrl = useMemo(() => (code ? buildPairUrl(siteOrigin, code) : ""), [siteOrigin, code]);
-
   const doPublish = useCallback(async (c: string, e: number) => {
     const res = await publishLaptopPairing(c, e, laptopNameRef.current);
     setPublishError(res.ok ? null : res.failure);
@@ -82,7 +73,7 @@ export default function DevicesSection() {
 
   // Load-or-create the static code on mount: reuse the row's code whenever
   // usable, generating only once. Republishing refreshes last_seen and bumps
-  // legacy 5-minute expiries to far-future without changing the code.
+  // legacy expiries to far-future without changing the code.
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     let alive = true;
@@ -215,22 +206,29 @@ export default function DevicesSection() {
     setRotateBusy(true);
     setRotateMsg(null);
     try {
+      // Rotating disconnects the phone: it must enter the new code to pair again.
+      try {
+        await unpairPhone();
+      } catch {
+        /* keep going — the new code still invalidates the old one */
+      }
       const c = generateSecurePairCode();
       createdAt.current = Date.now();
       setCode(c);
       setPhoneName(null);
+      setDevices({ laptop: devices.laptop, phone: null });
       setStatus("waiting");
       setShowRotate(false);
       setConfirmAction(null);
       setEpoch((e) => e + 1);
       await doPublish(c, farFuturePairExpiry());
-      setRotateMsg("Code rotated. Old QR screenshots stop working; paired phones stay paired.");
+      setRotateMsg("Code rotated. The phone was signed out — enter the new code on it to pair again.");
     } catch (e) {
       setRotateMsg(e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200));
     } finally {
       setRotateBusy(false);
     }
-  }, [doPublish]);
+  }, [devices.laptop, doPublish]);
 
   const wipeKeys = useCallback(async () => {
     setRotateBusy(true);
@@ -294,15 +292,12 @@ export default function DevicesSection() {
           <div className="mt-3 font-mono text-[11px] text-grey">Preparing your code…</div>
         ) : (
           <>
-            <div className="mt-3 flex justify-center rounded-[3px] bg-card p-4">
-              <QRCodeSVG value={pairUrl} size={200} bgColor="#ffffff" fgColor="#000000" level="M" role="img" aria-label={`Pairing QR code for ${pairUrl}`} />
-            </div>
             <div className="mt-3 flex items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={onCodeTap}
                 title="Pairing code"
-                className="cursor-pointer font-mono text-[22px] tracking-[0.08em]"
+                className="cursor-pointer font-mono text-[28px] tracking-[0.1em]"
               >
                 {formatPairCode(code)}
               </button>
@@ -315,13 +310,26 @@ export default function DevicesSection() {
               </button>
             </div>
             <div className="mt-2 text-center font-mono text-[10.5px] text-grey-soft">
-              This laptop is named{" "}
+              Enter this code on your phone under Remote. This laptop is named{" "}
               <input
                 value={laptopName}
                 onChange={(e) => setLaptopName(e.target.value.slice(0, 40))}
                 aria-label="Laptop name"
                 className="w-[130px] rounded-[3px] border border-line-strong bg-card px-1.5 py-0.5 font-mono text-[10.5px] text-ink outline-none"
               />
+            </div>
+            <div className="mt-2 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setRotateMsg(null);
+                  setConfirmAction("code");
+                  setShowRotate(true);
+                }}
+                className="cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink"
+              >
+                Rotate code
+              </button>
             </div>
             {(status === "confirming" || status === "connected") && phoneName && (
               <div className="mt-2 text-center font-mono text-[11px] text-accent-deep">
@@ -353,7 +361,7 @@ export default function DevicesSection() {
                 {confirmAction === "code" && (
                   <div className="mt-2">
                     <p className="font-mono text-[11px] leading-[1.5] text-grey">
-                      Old QR screenshots stop working. Paired phones stay paired. Continue?
+                      Old codes stop working and the phone is signed out — it must enter the new code. Paired phones do not carry over. Continue?
                     </p>
                     <div className="mt-2 flex gap-2">
                       <button
