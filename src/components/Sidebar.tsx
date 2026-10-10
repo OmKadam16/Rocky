@@ -35,7 +35,7 @@ export default function Sidebar({ page, onNavigate, open, onToggle, fixedCount, 
 
   if (!open) {
     return (
-      <div className="flex w-[62px] flex-none flex-col items-center border-r border-line bg-sidebar pb-[26px] pt-[30px]">
+      <div className="flex max-h-screen w-[62px] flex-none flex-col items-center overflow-hidden border-r border-line bg-sidebar pb-[26px] pt-[30px]">
         <button
           type="button"
           onClick={onToggle}
@@ -75,7 +75,7 @@ export default function Sidebar({ page, onNavigate, open, onToggle, fixedCount, 
   }
 
   return (
-    <div className="flex w-[208px] flex-none flex-col border-r border-line bg-sidebar pb-[26px] pt-[30px]">
+    <div className="flex max-h-screen w-[208px] flex-none flex-col overflow-hidden border-r border-line bg-sidebar pb-[26px] pt-[30px]">
       <div className="flex items-center justify-between px-[22px] pb-[26px]">
         <div className="font-mono text-13 tracking-wordmark uppercase text-ink">Rocky</div>
         <button

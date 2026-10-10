@@ -114,7 +114,7 @@ export default function App() {
   });
 
   return (
-    <div className="relative flex h-screen min-h-[900px] overflow-hidden bg-canvas text-ink">
+    <div className="relative flex h-screen overflow-hidden bg-canvas text-ink">
       {showOnboarding && (
         <Onboarding
           onDone={(next) => {
