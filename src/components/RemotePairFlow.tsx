@@ -54,6 +54,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimer = useRef<number | null>(null);
+  const scanTimer2 = useRef<number | null>(null);
   const confirmTimer = useRef<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -79,6 +80,10 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
     if (scanTimer.current) {
       window.clearInterval(scanTimer.current);
       scanTimer.current = null;
+    }
+    if (scanTimer2.current) {
+      window.clearInterval(scanTimer2.current);
+      scanTimer2.current = null;
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -194,9 +199,11 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   );
 
   const startJsQrLoop = useCallback(
-    (video: HTMLVideoElement) => {
-      if (scanTimer.current) return;
-      // Fallback: small JS QR decoder (jsQR) over video frames.
+    (video: HTMLVideoElement, everyMs = 400) => {
+      if (scanTimer2.current) return;
+      // Second-opinion decoder (jsQR) over video frames. Runs alongside the
+      // native detector when present: a native detector that returns empty
+      // forever must not block decoding. First success wins.
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
@@ -213,9 +220,9 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
         }
         return false;
       };
-      scanTimer.current = window.setInterval(() => {
+      scanTimer2.current = window.setInterval(() => {
         const now = Date.now();
-        if (now - last < 400) return;
+        if (now - last < everyMs) return;
         last = now;
         try {
           const w = video.videoWidth;
@@ -254,15 +261,17 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
               if (raw) handleDetectedText(raw);
             } catch {
               // A detector that always throws is worse than none:
-              // fall back to jsQR instead of scanning blind forever.
+              // stop it and let the jsQR loop below carry on alone.
               failures += 1;
               if (failures >= 8) {
                 if (scanTimer.current) window.clearInterval(scanTimer.current);
                 scanTimer.current = null;
-                startJsQrLoop(video);
               }
             }
           }, 350);
+          // jsQR runs alongside at a slower cadence: a native detector that
+          // returns empty forever must not block decoding. First hit wins.
+          startJsQrLoop(video, 900);
           return;
         } catch {
           /* fall through to jsQR */
