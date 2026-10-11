@@ -345,6 +345,36 @@ faster on gpt-5-nano, and the voice says "one moment" while it thinks.
 - [x] Spoken "One moment" (fits the request) if the planner takes more than 0.6 s, "Still on it"
       after 9 s; the reply waits for it; follows Profile → Voice → Spoken progress updates.
 
+### Phase 14: Phone: Chat + Calendar tabs
+Goal: the phone web app gets a bottom tab bar with CHAT and CALENDAR, and can ask Memory questions
+that the laptop answers. No Supabase schema change.
+Exception to "Memory content never goes to Supabase" (Om's spec, 2026-10-11): a Memory question
+from the phone and its answer card ride ONE transient `commands` row (text `rocky-memory:v1`);
+the phone deletes it right after reading, the laptop purges memory rows older than 2 minutes on
+start and every minute. Memory itself (pages, gists, vectors) never leaves the laptop.
+- [x] Tab bar (role=tablist, sliding pill, 44 px targets): last tab remembered, Calendar on first
+      open, `?tab=chat` deep link; 220 ms fade/slide between tabs; hidden while the keyboard is up
+      (the shell follows `visualViewport`, so the composer stays above the keyboard).
+- [x] Calendar tab: same header, chip, day/week, strip and list; TalkDock replaced by a floating
+      mic (bottom-right), a reply toast (2 s after the turn, "Open chat"), and any pending
+      Confirm/Cancel or booking AgentCard kept above the tab bar.
+- [x] Chat tab: thread (user right, Rocky left), cards (commitment, receipt + Undo, Memory, agent),
+      composer (input, Send, mic), thinking/listening/speaking, errors, laptop-asleep notice,
+      Confirm/Cancel; header with chip, Memory · N (shared ChatMemoryPanel), Clear chat, settings.
+- [x] Phone chat history in local Dexie (last 200); private turns (Memory Q&A) never saved.
+- [x] Memory relay (`src/lib/memoryRelay.ts` protocol, `memoryRelayLive.ts` Supabase binding):
+      laptop answers with the same local path; 30 s timeout; asleep / Memory off / Ollama down /
+      nothing found / toggle off each one sentence. "Allow Memory questions from my phone"
+      (profile extra `phone_memory_questions`, default on) in laptop Profile → Devices and the
+      phone settings sheet; the laptop enforces it. The first relayed card notes "Sent through your
+      account for a moment, then deleted."
+- [x] Tests: tabs / deep link / persistence / keyboard / toast / pending cards, private turns not
+      saved, relay protocol with a fake Supabase (round trip, delete-after-read, expiry, purge,
+      toggle off, laptop offline, timeout), planner never sees memory text. Screenshots:
+      `npm run screens:phone` (mocked Supabase; 390x844 + 360x740, light + dark, keyboard open).
+- [ ] Om: deploy the web build where the phone loads it (Render), refresh the phone, run the
+      manual test in the report.
+
 ---
 
 ## 6. Do not build
@@ -457,3 +487,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Phase 13 Smarter, faster planner: low reasoning effort for GPT-5 models, 8-day rolling context with a plain-text calendar glance, a detailed calendar guide in the prompt, `delete_blocks` (one confirmation clears several blocks), and a spoken "One moment" while the planner thinks.
 - 2026-10-11: Network errors are named and retried: voice-to-text, voice reply, calendar reads and the planner each retry once on a network blip and say which service dropped instead of "Failed to fetch"; a small local error log (service + browser message, no user text) shows in the vc-debug readout.
 - 2026-10-11: 12-hour clock in replies: the prompt teaches "8 AM / 12 PM / 8 to 10 PM" both ways (user commands in, replies out), the calendar glance shows each time's spoken form, and every assistant reply (on screen and spoken, laptop and phone) passes through `speakableTimes` so no 24-hour time or ISO date reaches the user.
+- 2026-10-11: Phase 14 Phone: Chat + Calendar tabs (bottom tab bar, floating mic + reply toast + pending cards on Calendar, full chat with cards and composer, keyboard-aware), phone chat history without private turns, Memory questions from the phone answered on the laptop through one transient relay row (deleted after reading, purged after 2 min), "Allow Memory questions from my phone" toggle. No schema change.
