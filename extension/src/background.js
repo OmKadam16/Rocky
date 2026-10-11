@@ -35,7 +35,7 @@ async function post(item) {
   try {
     res = await fetch(`${server(c.port)}/ingest`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${c.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${c.token}`, "Content-Type": "application/json", "X-Rocky-Extension": chrome.runtime.id },
       body: JSON.stringify(item),
     });
   } catch {
@@ -116,8 +116,16 @@ async function status() {
   const base = { connected: false, paused: c.paused, port: c.port, saved: local.saved || 0, queued: (local.queue || []).length, hasToken: Boolean(c.token) };
   if (!c.token) return base;
   try {
-    const r = await fetch(`${server(c.port)}/status`, { headers: { Authorization: `Bearer ${c.token}` } });
-    if (!r.ok) return { ...base, error: r.status === 401 ? "Token doesn't match — paste the one from Rocky's Memory page." : "Rocky refused the connection." };
+    const r = await fetch(`${server(c.port)}/status`, { headers: { Authorization: `Bearer ${c.token}`, "X-Rocky-Extension": chrome.runtime.id } });
+    if (!r.ok) {
+      const why =
+        r.status === 401
+          ? "Token doesn't match — paste the one from Rocky's Memory page."
+          : r.status === 403
+            ? `Rocky didn't recognise this extension (id ${chrome.runtime.id}). Reload it from extension/dist.`
+            : `Rocky refused the connection (${r.status}).`;
+      return { ...base, error: why };
+    }
     const j = await r.json();
     await set({ remoteExcluded: j.excluded || [], connected: true });
     return { ...base, connected: true, appEnabled: j.enabled, appPaused: j.paused, count: j.count };

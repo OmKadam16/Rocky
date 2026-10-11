@@ -52,12 +52,17 @@ function createMemoryServer(opts) {
     const origin = req.headers.origin;
     const hostHeader = String(req.headers.host || "");
     if (hostHeader !== `127.0.0.1:${port}` && hostHeader !== `localhost:${port}`) return send(res, 421, { ok: false, error: "bad host" });
-    if (origin !== allowedOrigin) return send(res, 403, { ok: false, error: "forbidden" });
+    // Chrome omits Origin on some extension requests (plain GETs from the
+    // service worker). Then the extension names itself in X-Rocky-Extension:
+    // a web page can't send that header cross-origin without a preflight,
+    // and a preflight always carries an Origin, which is refused here.
+    const fromUs = origin === allowedOrigin || (origin === undefined && req.headers["x-rocky-extension"] === extensionId);
+    if (!fromUs) return send(res, 403, { ok: false, error: "forbidden" });
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
         "Access-Control-Allow-Origin": allowedOrigin,
         "Access-Control-Allow-Methods": "GET, POST",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Rocky-Extension",
         "Access-Control-Max-Age": "600",
         Vary: "Origin",
       });

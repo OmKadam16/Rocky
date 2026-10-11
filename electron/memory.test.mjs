@@ -146,13 +146,14 @@ describe("ingest server: token + origin + host + size", () => {
     const { s } = store();
     srv = createMemoryServer({ store: s, port: 0, maxBody });
     const port = await srv.start();
-    const call = (p, { method = "POST", origin = ORIGIN, token = s.settings().token, body, host } = {}) =>
+    const call = (p, { method = "POST", origin = ORIGIN, token = s.settings().token, body, host, headers = {} } = {}) =>
       fetch(`http://127.0.0.1:${port}${p}`, {
         method,
         headers: {
           ...(origin ? { Origin: origin } : {}),
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(host ? { Host: host } : {}),
+          ...headers,
           "Content-Type": "application/json",
         },
         body: body ? JSON.stringify(body) : undefined,
@@ -189,6 +190,17 @@ describe("ingest server: token + origin + host + size", () => {
     s.setSettings({ paused: false, enabled: false });
     expect((await call("/ingest", { body: page })).status).toBe(409);
     expect(s.stats().count).toBe(0);
+  });
+
+  it("no Origin (Chrome omits it on some extension GETs): allowed only with our X-Rocky-Extension id", async () => {
+    const { call } = await up();
+    const ok = await call("/status", { method: "GET", origin: null, headers: { "X-Rocky-Extension": EXTENSION_ID } });
+    expect(ok.status).toBe(200);
+    expect((await call("/status", { method: "GET", origin: null })).status).toBe(403);
+    expect((await call("/status", { method: "GET", origin: null, headers: { "X-Rocky-Extension": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } })).status).toBe(403);
+    // A web page sending the header still has an Origin: refused.
+    expect((await call("/status", { method: "GET", origin: "https://evil.example", headers: { "X-Rocky-Extension": EXTENSION_ID } })).status).toBe(403);
+    expect((await call("/status", { method: "GET", origin: null, token: null, headers: { "X-Rocky-Extension": EXTENSION_ID } })).status).toBe(401);
   });
 
   it("status needs the token too; preflight answers only our origin", async () => {
