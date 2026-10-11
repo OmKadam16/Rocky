@@ -6,6 +6,8 @@
  * which still rides along for ids and details.
  */
 
+import { range12h, to12h } from "./clockTalk";
+
 type GlanceBlock = { id: string; title: string; source_type?: string; start_time: string; end_time: string; moved_from?: string | null; notes?: string | null };
 type GlanceFixed = { id: string; name: string; start_time: string; end_time: string; notes?: string | null };
 type GlanceDay = { date: string; weekday: string; free_windows?: { start_time: string; end_time: string }[]; fixed_commitments: GlanceFixed[]; blocks: GlanceBlock[] };
@@ -40,23 +42,26 @@ function when(date: string, start: string, end: string, today: string, now: stri
 }
 
 function dayName(d: GlanceDay, s: GlanceSnapshot): string {
-  if (d.date === s.today) return `TODAY, ${d.weekday} ${d.date} (it is ${s.now} now)`;
+  if (d.date === s.today) return `TODAY, ${d.weekday} ${d.date} (it is ${s.now} = ${to12h(s.now)} now)`;
   if (d.date === s.tomorrow) return `TOMORROW, ${d.weekday} ${d.date}`;
   return `${d.weekday} ${d.date}`;
 }
 
 export function calendarGlance(s: GlanceSnapshot): string {
-  const lines: string[] = ["CALENDAR AT A GLANCE (24-hour times; ids in [brackets] are for tools, never say them aloud):"];
+  const lines: string[] = [
+    "CALENDAR AT A GLANCE (24-hour HH:MM for tools, then = how to say it; ids in [brackets] are for tools, never say them aloud):",
+  ];
+  const span = (a: string, b: string) => `${a}-${b} = ${range12h(a, b)}`;
   for (const d of s.week.days) {
     lines.push(`${dayName(d, s)}:`);
     const entries = [
       ...d.fixed_commitments.map((c) => ({
         start: c.start_time,
-        line: `${c.start_time}-${c.end_time} ${c.name} (fixed commitment: recurring, never moves, not deletable here${when(d.date, c.start_time, c.end_time, s.today, s.now)}) [${c.id}]`,
+        line: `${span(c.start_time, c.end_time)}: ${c.name} (fixed commitment: recurring, never moves, not deletable here${when(d.date, c.start_time, c.end_time, s.today, s.now)}) [${c.id}]`,
       })),
       ...d.blocks.map((b) => ({
         start: b.start_time,
-        line: `${b.start_time}-${b.end_time} ${b.title} (${blockKind(b)}${b.moved_from ? `, moved from ${b.moved_from}` : ""}${when(d.date, b.start_time, b.end_time, s.today, s.now)})${b.notes ? ` note: ${String(b.notes).slice(0, 80)}` : ""} [${b.id}]`,
+        line: `${span(b.start_time, b.end_time)}: ${b.title} (${blockKind(b)}${b.moved_from ? `, moved from ${b.moved_from}` : ""}${when(d.date, b.start_time, b.end_time, s.today, s.now)})${b.notes ? ` note: ${String(b.notes).slice(0, 80)}` : ""} [${b.id}]`,
       })),
     ].sort((a, b) => mins(a.start) - mins(b.start));
     if (!entries.length) lines.push("  nothing scheduled");
@@ -64,7 +69,7 @@ export function calendarGlance(s: GlanceSnapshot): string {
     const blocks = d.blocks.length;
     const fixed = d.fixed_commitments.length;
     lines.push(`  totals: ${blocks} block${blocks === 1 ? "" : "s"}, ${fixed} fixed commitment${fixed === 1 ? "" : "s"}`);
-    if (d.free_windows?.length) lines.push(`  free: ${d.free_windows.map((w) => `${w.start_time}-${w.end_time}`).join(", ")}`);
+    if (d.free_windows?.length) lines.push(`  free: ${d.free_windows.map((w) => span(w.start_time, w.end_time)).join(", ")}`);
   }
   const pending = (s.tasks ?? []).filter((t) => t.status === "pending" || t.status === "blocked");
   if (pending.length) {

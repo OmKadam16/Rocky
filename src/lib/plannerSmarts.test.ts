@@ -98,14 +98,14 @@ describe("calendar at a glance", () => {
   it("lists each day in time order with kind, status and id", () => {
     const g = calendarGlance(snap);
     const today = g.split("TOMORROW")[0];
-    expect(today).toMatch(/TODAY, Sunday 2026-10-11 \(it is 12:00 now\)/);
-    expect(today.indexOf("07:00-09:00 Nobu")).toBeLessThan(today.indexOf("10:00-11:30 Chem 101"));
-    expect(today.indexOf("10:00-11:30 Chem 101")).toBeLessThan(today.indexOf("19:00-21:00 Nobu Newport Beach"));
-    expect(g).toMatch(/07:00-09:00 Nobu \(event, already over\) \[b1\]/);
-    expect(g).toMatch(/19:00-21:00 Nobu Newport Beach \(event, later today\) \[b2\]/);
+    expect(today).toMatch(/TODAY, Sunday 2026-10-11 \(it is 12:00 = 12 PM now\)/);
+    expect(today.indexOf("07:00-09:00 = 7 to 9 AM: Nobu")).toBeLessThan(today.indexOf("10:00-11:30 = 10 to 11:30 AM: Chem 101"));
+    expect(today.indexOf("10:00-11:30 = 10 to 11:30 AM: Chem 101")).toBeLessThan(today.indexOf("19:00-21:00 = 7 to 9 PM: Nobu Newport Beach"));
+    expect(g).toMatch(/07:00-09:00 = 7 to 9 AM: Nobu \(event, already over\) \[b1\]/);
+    expect(g).toMatch(/19:00-21:00 = 7 to 9 PM: Nobu Newport Beach \(event, later today\) \[b2\]/);
     expect(g).toMatch(/Chem 101 \(fixed commitment: recurring, never moves/);
     expect(g).toMatch(/totals: 2 blocks, 1 fixed commitment/);
-    expect(g).toMatch(/free: 09:00-10:00, 11:45-19:00/);
+    expect(g).toMatch(/free: 09:00-10:00 = 9 to 10 AM, 11:45-19:00 = 11:45 AM to 7 PM/);
     expect(g).toMatch(/TOMORROW, Monday 2026-10-12:\n {2}nothing scheduled/);
     expect(g).toMatch(/Essay, due 2026-10-14, ~120 min, high priority/);
   });
@@ -130,6 +130,8 @@ describe("planner speed and prompt", () => {
     expect(SYSTEM_PROMPT).toMatch(/ONE delete_blocks call/);
     expect(SYSTEM_PROMPT).toMatch(/Never delete only the first one/);
     expect(SYSTEM_PROMPT).toMatch(/Never start with "One moment"/);
+    expect(SYSTEM_PROMPT).toMatch(/THE CLOCK: the user talks in 12-hour time/);
+    expect(SYSTEM_PROMPT).toMatch(/8 PM = 20:00/);
   });
 });
 

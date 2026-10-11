@@ -1,4 +1,5 @@
 import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
+import { speakableTimes } from "./clockTalk";
 import { getSecret } from "./secrets";
 import { db } from "./db";
 import { startTranscription } from "./transcribe";
@@ -445,8 +446,10 @@ async function speakOneChunk(chunk: string, key: string, voiceId: string, contro
   await playBlob(blob, controller);
 }
 
-export async function speak(text: string, opts?: { signal?: AbortSignal }): Promise<void> {
-  if (!text.trim()) return;
+export async function speak(rawText: string, opts?: { signal?: AbortSignal }): Promise<void> {
+  if (!rawText.trim()) return;
+  // Always the 12-hour clock out loud: "8 PM", never "20:00".
+  const text = speakableTimes(rawText);
 
   const key = (await getSecret("el_key"))?.trim();
   if (!key) {

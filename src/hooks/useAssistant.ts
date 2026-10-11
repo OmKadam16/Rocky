@@ -6,6 +6,7 @@ import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, is
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { startThinkingAck, type ThinkingAck } from "../lib/thinkingAck";
 import { describeFailure, logFailure } from "../lib/netErrors";
+import { speakableTimes } from "../lib/clockTalk";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 import { foldIntoSummary } from "../lib/chatMemory";
@@ -190,7 +191,9 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
   const turnsRef = useRef<AssistantTurn[]>([]);
   const isConversationRef = useRef(false);
 
-  const push = useCallback((turn: Omit<AssistantTurn, "id">) => {
+  const push = useCallback((raw: Omit<AssistantTurn, "id">) => {
+    // Rocky's own words use the 12-hour clock ("8 PM"), on screen as out loud.
+    const turn = raw.role === "assistant" && raw.text ? { ...raw, text: speakableTimes(raw.text) } : raw;
     const full: AssistantTurn = { ...turn, id: nextId(), at: Date.now() };
     turnsRef.current = [...turnsRef.current, full];
     setTurns(turnsRef.current);
