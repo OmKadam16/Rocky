@@ -328,6 +328,23 @@ Goal: the phone pairs with the typed 8-char code and stays connected to the desk
 - [ ] Om: host the web app on https (e.g. Render), set `VITE_PUBLIC_URL` to it (or paste it in
       Devices → Change address), rebuild, and run the phone test in the report.
 
+### Phase 13: Smarter, faster planner
+Goal: the planner understands the calendar, clears several blocks with one confirmation, answers
+faster on gpt-5-nano, and the voice says "one moment" while it thinks.
+- [x] Speed: GPT-5 models (OpenAI) run with `reasoning_effort: "low"`, `verbosity: "low"`
+      (they defaulted to medium on every round); note summaries use "minimal".
+- [x] Calendar understanding: context covers today + the next 7 days (the Mon-Sun week left out
+      tomorrow on a Sunday) and starts with a plain-text CALENDAR AT A GLANCE (every entry in time
+      order with kind, over / now / later today, id, per-day totals and free windows, pending tasks).
+- [x] Prompt: THE CALENDAR guide (fixed commitments, blocks, holds, tasks, free windows,
+      preferences), what users' words mean (all / clear / tonight / this afternoon / that one),
+      answering calendar questions from the glance, a silent 5-step routine, worked examples
+      (including "remove all the blocks today").
+- [x] `delete_blocks`: one preview naming every block, one question, one confirmed call that deletes
+      the whole list (the preview is remembered, so a bare "yes" works); fixed commitments stay.
+- [x] Spoken "One moment" (fits the request) if the planner takes more than 0.6 s, "Still on it"
+      after 9 s; the reply waits for it; follows Profile → Voice → Spoken progress updates.
+
 ---
 
 ## 6. Do not build
@@ -437,3 +454,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Chat memory now syncs between laptop and phone through profile `extra.chat_memory` (no migration): facts and the summary are shared, folding bookkeeping stays per device, every write reads fresh first so neither device drops the other's change, a change on one device refreshes the other's Memory list over realtime, and the laptop's earlier local-only memory is merged in once. Installer rebuilt and reinstalled.
 - 2026-10-11: Phase 11 Unified Memory: raw pages are a 24 h inbox; a background worker gists them with the local model (JSON schema, injection-safe, secrets redacted), merges reading sessions and dedupes, embeds locally (nomic-embed-text, BM25 fallback); hybrid search with a relevance threshold; monthly compaction into digests + overviews (pinned / important kept, 7-day undo, resumable, size cap); retention setting replaced by compaction (Om's call); Memory page shows tiers, storage, queue, compaction and browse-by-month; extension sends time on page. Fixture: a busy month (200 entries) compacts 11.4x. No Supabase change.
 - 2026-10-11: Phase 12 Phone connect fix: Devices shows the phone address (VITE_PUBLIC_URL or a saved "Phone site address", never app://rocky) + build guard; desktop keys now also go to the shared profile row (they were only in the keychain, so the phone had no key) with cloud fallback and a one-time sync; the desktop window isn't throttled when minimized, stays unsuspended while a phone is paired and heartbeats on focus/online/wake with a retry; phone Connection check (6 steps) and specific wrong-code messages; laptop shows the phone's last ping. No schema change.
+- 2026-10-11: Phase 13 Smarter, faster planner: low reasoning effort for GPT-5 models, 8-day rolling context with a plain-text calendar glance, a detailed calendar guide in the prompt, `delete_blocks` (one confirmation clears several blocks), and a spoken "One moment" while the planner thinks.
