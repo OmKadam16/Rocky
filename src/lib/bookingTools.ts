@@ -25,6 +25,7 @@ import {
   formatPlan,
   isExplicitYes,
   knownFacts,
+  fillKnown,
   missingSlots,
   nextQuestion,
   normalizeSiteUrl,
@@ -71,7 +72,11 @@ export const BOOKING_TOOL_SCHEMAS: ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: {
-          type: { type: "string", enum: TASK_TYPES, description: "restaurant, appointment (barber, salon, doctor, any service) or tickets" },
+          type: {
+            type: "string",
+            enum: TASK_TYPES,
+            description: "The kind of PLACE, not the user's word: any restaurant, bar or cafe is restaurant even if they say 'appointment'; barber, salon, doctor, any service is appointment; events are tickets",
+          },
           venue: str,
           area: { ...str, description: "City or neighbourhood" },
           site_url: { ...str, description: "Booking site the user named, if any" },
@@ -164,11 +169,26 @@ const pos = (v: unknown) => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 };
 
+/** "Nobu", "nobu newport", "Nobu Newport Beach": the same place. */
+export function samePlace(a: string | null, b: string | null): boolean {
+  const n = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(the|restaurant|in|at)\b/g, " ").trim();
+  if (!a || !b) return true;
+  const x = n(a);
+  const y = n(b);
+  if (!x || !y) return true;
+  return x === y || x.startsWith(y) || y.startsWith(x) || x.includes(y) || y.includes(x);
+}
+
 function draftFrom(args: Record<string, unknown>, prior: BookingDraft | null): BookingDraft {
   const type: TaskType = TASK_TYPES.includes(args.type as TaskType) ? (args.type as TaskType) : (prior?.type ?? "restaurant");
   const venue = text(args.venue);
-  // A different place is a new booking; the same (or unnamed) place continues the draft.
-  const base = prior && (!venue || !prior.venue || venue.toLowerCase() === prior.venue.toLowerCase()) && type === prior.type ? prior : { ...EMPTY_DRAFT, type };
+  // The same (or unnamed) place continues the draft, even if the type was
+  // corrected ("appointment" -> "restaurant"): nothing the user said is lost.
+  // A different place starts fresh but keeps who's booking.
+  let base: BookingDraft;
+  if (prior && samePlace(venue, prior.venue)) base = { ...prior, type };
+  else if (prior) base = { ...EMPTY_DRAFT, type, firstName: prior.firstName, lastName: prior.lastName, phone: prior.phone, email: prior.email };
+  else base = { ...EMPTY_DRAFT, type };
   const pick = <K extends keyof BookingDraft>(k: K, v: BookingDraft[K] | null) => (v != null ? v : base[k]);
   return {
     type,
@@ -238,8 +258,11 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
 
     case "propose_booking": {
       const known = await knownFacts();
-      let d = applySuggestion(draftFrom(args, building), ctx.userText);
+      let d = fillKnown(applySuggestion(draftFrom(args, building), ctx.userText), known);
       building = d;
+      // Remember what the user gave as soon as they give it, so a later turn
+      // (or the next booking) never asks again.
+      void rememberFacts({ phone: d.phone, city: d.area, firstName: d.firstName, lastName: d.lastName, email: d.email });
       const missing = missingSlots(d);
       if (missing.length > 0) {
         const q = nextQuestion(d, known);
@@ -272,7 +295,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       const eventClash = await cal.eventOverlapError(date, start, end, ownHold?.id);
       if (eventClash) return eventClash;
       d = { ...d, endTime: d.endTime ?? null };
-      await rememberFacts({ phone: d.phone, city: d.area });
+      await rememberFacts({ phone: d.phone, city: d.area, firstName: d.firstName, lastName: d.lastName, email: d.email });
       const title = buildHoldTitle(d);
       let holdId: string;
       if (ownHold) {

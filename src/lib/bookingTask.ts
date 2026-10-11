@@ -173,7 +173,28 @@ export type KnownFacts = {
   email?: string | null;
   phone?: string | null;
   city?: string | null;
+  /** Given (or confirmed) by the user in an earlier booking: reused without asking. */
+  bookingFirstName?: string | null;
+  bookingLastName?: string | null;
+  bookingEmail?: string | null;
 };
+
+/**
+ * Contact details the user already gave Rocky for a booking (name, phone,
+ * email) go straight into a new draft instead of being asked again. They
+ * still appear in the plan read back before anything is booked, so a wrong
+ * one costs one correction, not a round of questions.
+ */
+export function fillKnown(d: BookingDraft, known: KnownFacts = {}): BookingDraft {
+  const next = { ...d };
+  if (!next.firstName && !next.lastName && known.bookingFirstName?.trim() && known.bookingLastName?.trim()) {
+    next.firstName = known.bookingFirstName.trim();
+    next.lastName = known.bookingLastName.trim();
+  }
+  if (!next.phone && known.phone?.trim()) next.phone = known.phone.trim();
+  if (!next.email && known.bookingEmail?.trim()) next.email = known.bookingEmail.trim();
+  return next;
+}
 
 export function splitName(name: string | null | undefined): { first: string; last: string } | null {
   const parts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
@@ -347,11 +368,20 @@ export const isStop = (text: string | null | undefined) => STOP.test(String(text
 export const isContinue = (text: string | null | undefined) => CONTINUE.test(String(text ?? ""));
 
 // ---------------------------------------------------------------------------
-// Remembered facts (profile `extra`, no migration). Phone and city are only
-// written after the user gave them once in a booking.
+// Remembered facts (profile `extra`, no migration). Name, phone, email and
+// city are only written after the user gave (or confirmed) them in a booking,
+// and are saved as soon as they're given, not only when a plan completes.
 // ---------------------------------------------------------------------------
 
-type ProfileExtra = { email?: string | null; display_name?: string | null; booking_phone?: string | null; home_city?: string | null };
+type ProfileExtra = {
+  email?: string | null;
+  display_name?: string | null;
+  booking_phone?: string | null;
+  home_city?: string | null;
+  booking_first_name?: string | null;
+  booking_last_name?: string | null;
+  booking_email?: string | null;
+};
 
 export async function knownFacts(): Promise<KnownFacts> {
   try {
@@ -361,16 +391,31 @@ export async function knownFacts(): Promise<KnownFacts> {
       email: p?.email?.trim() || null,
       phone: p?.booking_phone?.trim() || null,
       city: p?.home_city?.trim() || null,
+      bookingFirstName: p?.booking_first_name?.trim() || null,
+      bookingLastName: p?.booking_last_name?.trim() || null,
+      bookingEmail: p?.booking_email?.trim() || null,
     };
   } catch {
     return {};
   }
 }
 
-export async function rememberFacts(facts: { phone?: string | null; city?: string | null }): Promise<void> {
+export async function rememberFacts(facts: {
+  phone?: string | null;
+  city?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+}): Promise<void> {
   const patch: Record<string, string> = {};
   if (facts.phone?.trim()) patch.booking_phone = facts.phone.trim();
   if (facts.city?.trim()) patch.home_city = facts.city.trim();
+  // Name only as a pair, so a half-given name never overwrites a whole one.
+  if (facts.firstName?.trim() && facts.lastName?.trim()) {
+    patch.booking_first_name = facts.firstName.trim();
+    patch.booking_last_name = facts.lastName.trim();
+  }
+  if (facts.email?.trim() && /@/.test(facts.email)) patch.booking_email = facts.email.trim();
   if (!Object.keys(patch).length) return;
   try {
     const p = ((await db.profiles.get("local")) ?? { id: "local" }) as unknown as Record<string, unknown>;
