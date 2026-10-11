@@ -9,6 +9,8 @@ import {
   loadMemory,
   memoryContext,
   memoryStoreInMemory,
+  mergeMemory,
+  profileStore,
   rememberFact,
   turnsToFold,
   useMemoryStore,
@@ -122,5 +124,69 @@ describe("summary of earlier chat", () => {
     const m = await loadMemory();
     expect(m.facts).toHaveLength(0);
     expect(m.summary).toBe("");
+  });
+});
+
+describe("synced between laptop and phone (profile extra.chat_memory)", () => {
+  /** One profile row in "Supabase", two devices with their own localStorage. */
+  function cloud() {
+    let row: unknown = null;
+    const device = () => {
+      const local = new Map<string, string>();
+      return {
+        read: async () => (row ? JSON.parse(JSON.stringify(row)) : null),
+        write: async (m: unknown) => void (row = JSON.parse(JSON.stringify(m))),
+        localGet: (k: string) => local.get(k) ?? null,
+        localSet: (k: string, v: string | null) => void (v == null ? local.delete(k) : local.set(k, v)),
+      };
+    };
+    return { device, row: () => row as { facts: { text: string }[]; summary: string } | null };
+  }
+
+  it("a fact saved on the laptop is there on the phone, and forgetting works both ways", async () => {
+    const c = cloud();
+    const laptop = profileStore(c.device());
+    const phone = profileStore(c.device());
+    useMemoryStore(laptop);
+    await rememberFact("Their usual spot is Nobu Newport Beach");
+    useMemoryStore(phone);
+    expect((await loadMemory()).facts.map((f) => f.text)).toEqual(["Their usual spot is Nobu Newport Beach"]);
+    await rememberFact("Vegetarian");
+    useMemoryStore(laptop);
+    expect((await loadMemory()).facts.map((f) => f.text).sort()).toEqual(["Their usual spot is Nobu Newport Beach", "Vegetarian"]);
+    await forgetFacts("Nobu");
+    useMemoryStore(phone);
+    expect((await loadMemory()).facts.map((f) => f.text)).toEqual(["Vegetarian"]);
+  });
+
+  it("the summary is shared; which turns are summarised stays per device", async () => {
+    const c = cloud();
+    const laptop = profileStore(c.device());
+    const phone = profileStore(c.device());
+    useMemoryStore(laptop);
+    await foldIntoSummary([turn("user", "plan my exam week")], async () => "They're planning exam week.", { all: true });
+    useMemoryStore(phone);
+    const m = await loadMemory();
+    expect(m.summary).toBe("They're planning exam week.");
+    expect(m.summarizedUpTo).toBe(0); // the phone's own chat isn't summarised yet
+  });
+
+  it("a write never drops the other device's newer change (fresh read first)", async () => {
+    const c = cloud();
+    const laptop = profileStore(c.device());
+    const phone = profileStore(c.device());
+    await laptop.putFact({ id: "a", text: "Vegetarian", at: 1 });
+    await phone.putFact({ id: "b", text: "Prefers dinner around 8pm", at: 2 });
+    await laptop.setMeta("summary", "They like Nobu.");
+    expect(c.row()?.facts.map((f) => f.text)).toEqual(["Vegetarian", "Prefers dinner around 8pm"]);
+    expect(c.row()?.summary).toBe("They like Nobu.");
+  });
+
+  it("merging the old local-only memory keeps both sides, one per topic", () => {
+    const remote = { v: 1 as const, facts: [{ id: "r", text: "Their barber is Fade Co", at: 1 }], summary: "Phone chats.", updatedAt: 1 };
+    const local = { v: 1 as const, facts: [{ id: "l", text: "Their barber is Kings Cuts", at: 5 }, { id: "l2", text: "Vegetarian", at: 6 }], summary: "Laptop chats.", updatedAt: 6 };
+    const m = mergeMemory(remote, local);
+    expect(m.facts.map((f) => f.text)).toEqual(["Their barber is Kings Cuts", "Vegetarian"]);
+    expect(m.summary).toBe("Phone chats. Laptop chats.");
   });
 });

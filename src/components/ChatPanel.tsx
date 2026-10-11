@@ -105,7 +105,7 @@ export default function ChatPanel({ assistant, renderCard }: Props) {
       {memoryOpen && memoryCount > 0 && (
         <div className="border-b border-line bg-card px-[48px] py-[16px]">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-micro tracking-tab uppercase text-grey">What Rocky remembers · this device only</span>
+            <span className="font-mono text-micro tracking-tab uppercase text-grey">What Rocky remembers · laptop and phone</span>
             <button
               type="button"
               onClick={() => {

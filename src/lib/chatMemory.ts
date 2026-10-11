@@ -9,8 +9,10 @@
  *     leave the planner's window and when the chat is cleared.
  * The planner reads both at the top of every turn (plannerLocal.ts).
  *
- * Local to this device (its own Dexie database, never Supabase), like the chat
- * history it comes from. Never holds codes, passwords, card or ID numbers.
+ * Synced between the user's devices through the profile row's `extra`
+ * (`chat_memory`; RLS "own rows only"; no migration), so the phone and laptop
+ * share one memory. Built only from planner-visible turns: never Memory
+ * (browsing) answers, codes, passwords, card or ID numbers.
  */
 import Dexie, { type Table } from "dexie";
 import type { AssistantTurn } from "../types";
@@ -86,8 +88,135 @@ export function memoryStoreInMemory(): MemoryStore {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// Synced store: the profile row's `extra.chat_memory` (laptop + phone share
+// it; RLS "own rows only"; no migration). Only the folding bookkeeping
+// (which of THIS device's turns are summarised) stays on the device.
+// ---------------------------------------------------------------------------
+
+export type SyncedMemory = { v: 1; facts: ChatFact[]; summary: string; updatedAt: number };
+
+export type ProfileAccess = {
+  read: () => Promise<SyncedMemory | null>;
+  write: (m: SyncedMemory) => Promise<void>;
+  localGet: (key: string) => string | null;
+  localSet: (key: string, value: string | null) => void;
+};
+
+const EMPTY_SYNCED: SyncedMemory = { v: 1, facts: [], summary: "", updatedAt: 0 };
+
+function asSynced(raw: unknown): SyncedMemory | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Partial<SyncedMemory>;
+  const facts = Array.isArray(r.facts)
+    ? r.facts.filter((f): f is ChatFact => Boolean(f && typeof f.id === "string" && typeof f.text === "string")).map((f) => ({ id: f.id, text: f.text.slice(0, MAX_FACT_LEN), at: Number(f.at) || 0 }))
+    : [];
+  return { v: 1, facts: facts.slice(-MAX_FACTS), summary: typeof r.summary === "string" ? r.summary.slice(0, MAX_SUMMARY) : "", updatedAt: Number(r.updatedAt) || 0 };
+}
+
+/** Facts from both, same topic kept once (the newer wins); summaries joined. */
+export function mergeMemory(a: SyncedMemory, b: SyncedMemory): SyncedMemory {
+  const facts: ChatFact[] = [];
+  for (const f of [...a.facts, ...b.facts].sort((x, y) => x.at - y.at)) {
+    const i = facts.findIndex((g) => g.id === f.id || sameTopic(g.text, f.text));
+    if (i >= 0) facts.splice(i, 1);
+    facts.push(f);
+  }
+  const summary = [a.summary.trim(), b.summary.trim()].filter(Boolean).filter((x, i, all) => all.indexOf(x) === i).join(" ").slice(0, MAX_SUMMARY);
+  return { v: 1, facts: facts.slice(-MAX_FACTS), summary, updatedAt: Math.max(a.updatedAt, b.updatedAt) };
+}
+
+const LOCAL_META = new Set(["summarized_up_to"]);
+
+export function profileStore(p: ProfileAccess): MemoryStore {
+  const read = async () => (await p.read()) ?? { ...EMPTY_SYNCED };
+  // Read fresh before every write so the other device's changes are kept.
+  const change = async (fn: (m: SyncedMemory) => SyncedMemory) => {
+    const next = fn(await read());
+    await p.write({ ...next, updatedAt: Date.now() });
+  };
+  return {
+    facts: async () => [...(await read()).facts].sort((a, b) => a.at - b.at),
+    putFact: (f) => change((m) => ({ ...m, facts: [...m.facts.filter((g) => g.id !== f.id), f] })),
+    deleteFacts: (ids) => change((m) => ({ ...m, facts: m.facts.filter((f) => !ids.includes(f.id)) })),
+    getMeta: async (key) => (LOCAL_META.has(key) ? p.localGet(key) : key === "summary" ? (await read()).summary : null),
+    setMeta: async (key, value) => {
+      if (LOCAL_META.has(key)) p.localSet(key, value);
+      else if (key === "summary") await change((m) => ({ ...m, summary: value.slice(0, MAX_SUMMARY) }));
+    },
+    clear: async () => {
+      await change(() => ({ ...EMPTY_SYNCED }));
+      p.localSet("summarized_up_to", null);
+    },
+  };
+}
+
+/** The real profile row (Supabase when signed in, local Dexie when not). */
+function realProfileAccess(): ProfileAccess {
+  const LS = (k: string) => `rocky-chat-memory:${k}`;
+  return {
+    read: async () => {
+      const { db } = await import("./db");
+      const row = (await db.profiles.get("local")) as unknown as { chat_memory?: unknown } | undefined;
+      return asSynced(row?.chat_memory);
+    },
+    write: async (m) => {
+      const { db } = await import("./db");
+      await db.profiles.update("local", { chat_memory: m } as never);
+    },
+    localGet: (k) => {
+      try {
+        return localStorage.getItem(LS(k));
+      } catch {
+        return null;
+      }
+    },
+    localSet: (k, v) => {
+      try {
+        if (v == null) localStorage.removeItem(LS(k));
+        else localStorage.setItem(LS(k), v);
+      } catch {
+        /* bookkeeping only: worst case a few turns are summarised twice */
+      }
+    },
+  };
+}
+
+/**
+ * Once per device: what this device kept locally before memory synced
+ * (RockyChatMemory) is merged into the synced copy, then emptied.
+ */
+async function migrateLocal(target: MemoryStore, p: ProfileAccess): Promise<void> {
+  if (p.localGet("migrated") === "1") return;
+  try {
+    const local = dexieStore();
+    const [facts, summary, upTo] = await Promise.all([local.facts(), local.getMeta("summary"), local.getMeta("summarized_up_to")]);
+    if (facts.length || summary) {
+      const remote = (await p.read()) ?? { ...EMPTY_SYNCED };
+      await p.write(mergeMemory(remote, { v: 1, facts, summary: summary ?? "", updatedAt: Date.now() }));
+      if (upTo) p.localSet("summarized_up_to", upTo);
+      await local.clear();
+      changed();
+    }
+    p.localSet("migrated", "1");
+  } catch {
+    /* try again next launch */
+  }
+  void target;
+}
+
+let migrating: Promise<void> | null = null;
+
 let store: MemoryStore | null = null;
-const s = () => (store ??= dexieStore());
+const s = (): MemoryStore => {
+  if (store) return store;
+  const access = realProfileAccess();
+  const synced = profileStore(access);
+  store = synced;
+  migrating ??= migrateLocal(synced, access);
+  return synced;
+};
 /** Tests only. */
 export function useMemoryStore(next: MemoryStore | null) {
   store = next;
@@ -97,7 +226,21 @@ const listeners = new Set<() => void>();
 const changed = () => listeners.forEach((l) => l());
 export function onMemoryChange(fn: () => void): () => void {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  // The other device changed it: the profile row arrives over realtime.
+  const remote = () => fn();
+  try {
+    window.addEventListener("vc-profile-update", remote);
+  } catch {
+    /* not in a browser */
+  }
+  return () => {
+    listeners.delete(fn);
+    try {
+      window.removeEventListener("vc-profile-update", remote);
+    } catch {
+      /* not in a browser */
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +249,8 @@ export function onMemoryChange(fn: () => void): () => void {
 
 export async function loadMemory(): Promise<ChatMemory> {
   try {
+    s();
+    if (migrating) await migrating;
     const [facts, summary, upTo] = await Promise.all([s().facts(), s().getMeta("summary"), s().getMeta("summarized_up_to")]);
     return { facts, summary: summary ?? "", summarizedUpTo: Number(upTo) || 0 };
   } catch {

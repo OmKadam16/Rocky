@@ -64,6 +64,9 @@ Rules:
   Claiming still needs the account's own session, so a leaked code alone grants nothing.
   Leak response: hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys
   everywhere + revoke at the provider dashboards).
+- Chat memory syncs per user through the profile row's `extra.chat_memory` (facts + summary, no
+  migration). It is built only from planner-visible chat turns: never Memory (browsing) content,
+  codes, passwords, card or ID numbers. Which of a device's turns are summarised stays local.
 - Any schema change = a new numbered migration + a test in `migrations.test.ts` + a note here.
 
 ## 4. Status
@@ -362,3 +365,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Booking draft fixes from a live Nobu chat: correcting the type ("appointment" → restaurant) or naming the place more fully ("Nobu" → "Nobu Newport Beach") no longer wipes the draft (it re-asked everything twice); a different place keeps who's booking. Name, phone and email given in a booking are remembered right away (profile `extra`: booking_first_name/last_name/booking_email, no migration) and reused silently next time, still shown in the plan read-back. Type follows the kind of place (a restaurant never gets "Which service?"). Regression test replays the chat. Installer rebuilt and reinstalled.
 - 2026-10-10: Booking go-ahead fixed from a second live chat (plan read back three times, agent never started): a go-ahead right after the read-back ("yes", "Yes, make the appointment", "just book it") now starts the agent in code with no planner round trip; changes ("yes but at 9") and later unrelated yeses still go to the planner; book_appointment and the yes-to-suggestion accept the same natural wording. Agent prompt: TASK details are never re-asked, how to reach and fill a booking widget, ask with the closest open times when the exact one is taken. Installer rebuilt and reinstalled.
 - 2026-10-10: Chat memory (`src/lib/chatMemory.ts`, local Dexie `RockyChatMemory`, this device only, never Supabase): facts the user asks Rocky to keep (planner tools remember_fact / forget_fact; same topic replaces, secrets refused) plus a running summary of conversation that has left the planner's 8-turn window, folded in the background and on Clear chat (which now clears messages, not memory). The planner reads chat_memory first every turn. Chat header: "Memory · N" lists it, with per-item ✕ and Forget everything. No migration. Installer rebuilt and reinstalled.
+- 2026-10-11: Chat memory now syncs between laptop and phone through profile `extra.chat_memory` (no migration): facts and the summary are shared, folding bookkeeping stays per device, every write reads fresh first so neither device drops the other's change, a change on one device refreshes the other's Memory list over realtime, and the laptop's earlier local-only memory is merged in once. Installer rebuilt and reinstalled.
