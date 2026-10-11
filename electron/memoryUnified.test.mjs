@@ -295,6 +295,16 @@ describe("hybrid search", () => {
     expect(topicOf(r.hits[0].memory)).toBe("marathon");
   });
 
+  it("keyword-only: one shared word stem is not a match (quantum *comput*ing vs *comput*ed values)", async () => {
+    const p = await fixturePipeline({ embed: brokenEmbed });
+    const id = p.store.insertMemory({ title: "useMemo versus useCallback", gist: "useMemo caches a computed value between renders while useCallback caches a function.", topics: ["react"], urls: [{ url: "https://react-docs.example/memo", title: "memo" }], first_seen: at(2027, 3, 5) });
+    expect(id).toBeTruthy();
+    const r = searchMemories(p.store, p.index, { keywords: ["quantum", "computing", "error", "correction"], queryVec: null, now: at(2027, 3, 20) });
+    expect(r).toMatchObject({ mode: "keyword", hits: [] });
+    const ok = searchMemories(p.store, p.index, { keywords: ["usememo", "computed", "value"], queryVec: null, now: at(2027, 3, 20) });
+    expect(ok.hits[0].memory.id).toBe(id);
+  });
+
   it("date range, site and kind filters", async () => {
     const p = await fixturePipeline();
     const feb = { from: at(2027, 2, 1, 0), to: at(2027, 3, 1, 0) - 1 };

@@ -452,7 +452,13 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
       .filter((w) => w.length > 1);
   const ftsQuery = (words, op = "OR") => ftsWords(words).map((w) => `("${w}" OR "${w}"*)`).join(` ${op} `);
 
-  /** BM25 over title / gist / topics / entities / body: [{ id, bm25 }] best first. */
+  /**
+   * BM25 over title / gist / topics / entities / body: [{ id, bm25, coverage }]
+   * best first. `coverage` is the share of the query's words the memory
+   * contains (stemmed / prefix), so a single shared word ("computing" vs
+   * "computed") can be told apart from a real match.
+   */
+  const stemOf = (w) => w.replace(/(ings?|ed|es|s)$/, "");
   function keywordSearch(keywords, limit = 60) {
     const words = ftsWords(keywords);
     if (!words.length) return [];
@@ -461,7 +467,13 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
     let rows = words.length > 1 ? run(`"${words.join(" ")}"`) : [];
     if (!rows.length) rows = run(ftsQuery(keywords, "AND"));
     if (!rows.length) rows = run(ftsQuery(keywords));
-    return rows.map((r) => ({ id: Number(r.id), bm25: -Number(r.rank) }));
+    const stems = [...new Set(words.map(stemOf).filter((w) => w.length > 1))];
+    return rows.map((r) => {
+      const m = getMemory(r.id);
+      const hay = m ? ` ${[m.title, m.gist, m.topics.join(" "), m.entities.join(" "), m.key_points.join(" ")].join(" ").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")} ` : "";
+      const hit = stems.filter((w) => hay.includes(` ${w}`)).length;
+      return { id: Number(r.id), bm25: -Number(r.rank), coverage: stems.length ? hit / stems.length : 0 };
+    });
   }
 
   // ---- compaction bookkeeping ----------------------------------------------

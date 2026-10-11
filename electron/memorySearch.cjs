@@ -15,6 +15,8 @@ const { DAY } = require("./memoryQuery.cjs");
 
 const MIN_COSINE = 0.5;
 const MIN_COSINE_WITH_KEYWORD = 0.3;
+/** Keyword-only search: the memory must contain at least half the question's words. */
+const MIN_COVERAGE = 0.5;
 
 /**
  * opts: {
@@ -43,7 +45,9 @@ function searchMemories(store, index, opts) {
     return { mode: "time", hits: rows.slice(0, limit).map((m) => ({ memory: m, score: 1, cos: 0, bm25: 0, resolution: resolutionOf(m) })) };
   }
 
-  const kw = new Map(store.keywordSearch(keywords, 80).map((r) => [r.id, r.bm25]));
+  const kwRows = store.keywordSearch(keywords, 80);
+  const kw = new Map(kwRows.map((r) => [r.id, r.bm25]));
+  const coverage = new Map(kwRows.map((r) => [r.id, r.coverage ?? 1]));
   const vec = new Map();
   const useVec = Boolean(queryVec && index.size());
   if (useVec) for (const r of index.search(queryVec, 80)) vec.set(r.id, r.score);
@@ -57,7 +61,7 @@ function searchMemories(store, index, opts) {
     const cos = useVec ? (vec.has(id) ? vec.get(id) : cosine(queryVec, index.get(id))) : 0;
     const bm = kw.get(id) || 0;
     // Relevance gate.
-    if (useVec ? !(cos >= MIN_COSINE || (bm > 0 && cos >= MIN_COSINE_WITH_KEYWORD)) : bm <= 0) continue;
+    if (useVec ? !(cos >= MIN_COSINE || (bm > 0 && cos >= MIN_COSINE_WITH_KEYWORD)) : bm <= 0 || (coverage.get(id) ?? 0) < MIN_COVERAGE) continue;
     const ageDays = Math.max(0, (now - m.last_seen) / DAY);
     const recency = 1 / (1 + ageDays / 30);
     // Month / year overviews are broad: they only win when nothing more specific matches.
@@ -72,4 +76,4 @@ function searchMemories(store, index, opts) {
   return { mode: useVec ? "hybrid" : "keyword", hits: out.slice(0, limit) };
 }
 
-module.exports = { searchMemories, MIN_COSINE, MIN_COSINE_WITH_KEYWORD };
+module.exports = { searchMemories, MIN_COSINE, MIN_COSINE_WITH_KEYWORD, MIN_COVERAGE };

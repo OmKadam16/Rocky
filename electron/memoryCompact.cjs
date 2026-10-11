@@ -278,7 +278,7 @@ function createCompactor(deps) {
       store.setCompaction({ month, status: "done", entries: 0, digests: 0, bytesBefore: 0, bytesAfter: 0, at: now() });
       return { month, status: "empty", entries: 0, digests: 0, bytesBefore: 0, bytesAfter: 0 };
     }
-    const t0 = now();
+    const t0 = performance.now();
     const clusters = clusterMemories(entries, vecOf);
     const made = [];
     let failed = 0;
@@ -346,7 +346,7 @@ function createCompactor(deps) {
     for (const x of made) for (const m of x.members) index.delete(m.id);
     made.forEach((x, i) => vecs[i] && index.set(digestIds[i], vecs[i]));
     if (overviewRow && ovVec) index.set(digestIds[digestIds.length - 1], ovVec);
-    deps.onTiming?.({ compaction_ms: now() - t0, month });
+    deps.onTiming?.({ compaction_ms: Math.round(performance.now() - t0), month });
     const c = store.compaction(month);
     return { month, status: finished ? "done" : stopped ? "busy" : "partial", entries: c.entries, digests: c.digests, bytesBefore: c.bytesBefore, bytesAfter: c.bytesAfter, failed };
   }

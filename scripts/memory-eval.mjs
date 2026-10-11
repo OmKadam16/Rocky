@@ -31,6 +31,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(root, "test", "fixtures", "
 const chat = real ? (req) => ollamaChat(req, { model: chatModel, timeoutMs: 120000 }) : fakes.fakeChat();
 const embed = real ? (texts) => ollamaEmbed(texts, { model: embedModel }) : fakes.fakeEmbed;
 
+let embedWorks = true;
+try {
+  await embed(["probe"]);
+} catch {
+  embedWorks = false;
+}
 const p = createPipeline({ chat, embed, start: new Date(2027, 0, 1).getTime() });
 const t0 = Date.now();
 await p.feed(fixture.pages);
@@ -64,12 +70,12 @@ async function evaluate(label) {
     rows.push(`  ${topics[0] === q.topic || (q.topic == null && !r.hits.length) ? "✓" : "✗"} ${q.q.padEnd(52)} -> ${r.hits.slice(0, 2).map((h) => `${h.memory.title.slice(0, 34)} (${h.score.toFixed(2)})`).join(" | ") || "nothing"}`);
   }
   const pos = fixture.questions.length - neg;
-  console.log(`\n${label}: top-1 ${hit}/${pos} (${Math.round((100 * hit) / pos)}%), top-3 ${top3}/${pos}, unrelated -> nothing ${negOk}/${neg}`);
+  console.log(`\n${label} [${embedWorks ? "hybrid" : "keyword"} search]: top-1 ${hit}/${pos} (${Math.round((100 * hit) / pos)}%), top-3 ${top3}/${pos}, unrelated -> nothing ${negOk}/${neg}`);
   console.log(rows.join("\n"));
 }
 
 const s1 = p.store.stats();
-console.log(`Mode: ${real ? `real Ollama (${chatModel}, ${embedModel})` : "fake model"}; ${fixture.pages.length} pages fed in ${feedMs} ms`);
+console.log(`Mode: ${real ? `real Ollama (${chatModel}, ${embedWorks ? embedModel : `${embedModel} NOT INSTALLED -> keyword-only search`})` : "fake model + fake embeddings"}; ${fixture.pages.length} pages fed in ${feedMs} ms`);
 console.log(`After gisting: ${s1.tiers.detail} detail memories, ${s1.bytesByPart.memories + s1.bytesByPart.vectors} B (memories + vectors), raw inbox ${s1.bytesByPart.inbox} B`);
 await evaluate("Before compaction (March, Jan + Feb still in detail)");
 

@@ -123,6 +123,8 @@ function mergeInto(m, page, gist, why) {
 function createMemoryWorker(deps, opts = {}) {
   const { store, index } = deps;
   const now = deps.now || (() => Date.now());
+  /** Durations for the debug readout: real time, whatever `now` says. */
+  const clock = deps.clock || (() => performance.now());
   const perMinute = opts.perMinute ?? 6;
   const timeoutMs = opts.timeoutMs ?? ITEM_TIMEOUT_MS;
   const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS;
@@ -174,7 +176,7 @@ function createMemoryWorker(deps, opts = {}) {
       store.removeInbox(page.id);
       return { skipped: cls.why };
     }
-    const t0 = now();
+    const t0 = clock();
     let gist;
     if (cls.action === "search") gist = searchMemory(cls.query);
     else {
@@ -190,8 +192,8 @@ function createMemoryWorker(deps, opts = {}) {
         gist = titleOnlyMemory(page); // out of retries: keep at least the visit
       }
     }
-    const gistMs = now() - t0;
-    const t1 = now();
+    const gistMs = Math.round(clock() - t0);
+    const t1 = clock();
     const vec = await embedOne(embedText(gist));
     const candidates = [...store.seenSince(page.capturedAt - SESSION_GAP_MS), ...[store.findByUrl(page.url), store.findByHash(page.hash)].filter(Boolean)];
     const uniq = [...new Map(candidates.map((m) => [m.id, m])).values()];
@@ -230,7 +232,7 @@ function createMemoryWorker(deps, opts = {}) {
     }
     // The raw text goes as soon as the memory exists (a thumbnail moved over stays).
     store.removeInbox(page.id, { keepThumb: Boolean(page.manual && page.shot && !pick) });
-    const embedMs = now() - t1;
+    const embedMs = Math.round(clock() - t1);
     deps.onTiming?.({ gist_ms: gistMs, embed_ms: embedMs, kind: cls.action });
     lastError = null;
     return { id, merged: pick ? pick.why : null };
