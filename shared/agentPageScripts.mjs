@@ -9,9 +9,24 @@
 const POINT_JS = (x, y) => `(() => {
   const el = document.elementFromPoint(${x}, ${y});
   if (!el) return null;
+  // The overlay test (a fixed full-page banner): the element itself or any
+  // ancestor up to <body> may be the fixed layer (a static dialog inside a
+  // fixed backdrop is still a banner). Reports that layer's box.
+  const overlayBox = (() => { try {
+    let n = el;
+    for (let depth = 0; n && n !== document.body && depth < 6; depth += 1) {
+      const cs = getComputedStyle(n);
+      if (cs.position === "fixed" || cs.position === "sticky") {
+        const r = n.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height) };
+      }
+      n = n.parentElement;
+    }
+    return null;
+  } catch (e) { return null; } })();
   if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
     const r = el.getBoundingClientRect();
-    return { frame: Array.from(document.querySelectorAll("iframe,frame")).indexOf(el), left: r.left, top: r.top };
+    return { frame: Array.from(document.querySelectorAll("iframe,frame")).indexOf(el), left: r.left, top: r.top, overlay: overlayBox };
   }
   const t = el.closest('button,a,input,select,textarea,label,[role=button],[role=link],[role=option],[onclick]') || el;
   const tag = t.tagName.toLowerCase();
@@ -23,6 +38,7 @@ const POINT_JS = (x, y) => `(() => {
     ariaLabel: (t.getAttribute("aria-label") || "").slice(0, 120),
     value: tag === "input" && (type === "submit" || type === "button") ? String(t.value || "").slice(0, 120) : "",
     isSubmit,
+    overlay: overlayBox,
   };
 })()`;
 
@@ -50,7 +66,18 @@ const PROBE_JS = `(() => {
   const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 2 && r.height > 2 && s.visibility !== "hidden" && s.display !== "none"; };
   const q = (s) => Array.from(document.querySelectorAll(s)).filter(vis);
   const text = (document.body ? document.body.innerText : "").slice(0, 4000);
+  // Change signature for did-that-click-do-anything checks: lengths and
+  // counts only, never values (passwords excluded entirely).
+  const formState = (() => { try {
+    const checked = document.querySelectorAll('input[type=checkbox]:checked,input[type=radio]:checked').length;
+    const selects = Array.from(document.querySelectorAll("select")).map((e) => e.selectedIndex).join(",");
+    let len = 0;
+    document.querySelectorAll("input:not([type=password]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=image]),textarea").forEach((e) => { len += String(e.value || "").length; });
+    return checked + "|" + selects + "|" + len;
+  } catch (e) { return ""; } })();
   return {
+    textLen: document.body ? document.body.innerText.length : 0,
+    formState,
     hasPassword: q('input[type=password]').length > 0,
     // Visible, widget-sized only: invisible reCAPTCHA v3 / Stripe controller
     // frames load on ordinary pages and must not trigger a takeover.
@@ -134,6 +161,9 @@ const FOCUS_CODE_JS = (i) => `(() => {
   return document.activeElement === e;
 })()`;
 
+/** Current scroll position, for waiting out an animated scroll before shooting. */
+const SCROLL_POS_JS = `[window.scrollX, window.scrollY].join(",")`;
+
 /** How many characters the code field(s) hold in total (never the values). */
 const CODE_LEN_JS = `Array.from(document.querySelectorAll("[data-rocky-code]")).reduce((n, e) => n + String(e.value || "").length, 0)`;
 
@@ -159,6 +189,7 @@ export {
   POINT_JS,
   FOCUS_JS,
   PROBE_JS,
+  SCROLL_POS_JS,
   QUIET_JS,
   QUIET_MS,
   SETTLE_CAP_MS,

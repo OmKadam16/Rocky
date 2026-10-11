@@ -359,7 +359,7 @@ export function toAgentTask(d: BookingDraft, holdBlockId: string | null, model: 
 
 const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|confirm(ed)?|go ahead|do it|book it|please do|go for it|sounds good)\b[\s.!,]*(please|thanks)?[\s.!]*$/i;
 const NO = /^\s*(no|nope|nah|don'?t|do not|cancel|never ?mind|not now)\b/i;
-const STOP = /^\s*(stop|stop it|halt|abort|cancel( it| the booking)?|forget it)\s*[.!]*$/i;
+const STOP = /^\s*(stop|stop it|halt|abort|cancel( it| the booking)?|forget it|never ?mind)\s*[.!]*$/i;
 const CONTINUE = /^\s*(continue|carry on|go on|keep going|resume|done|i'?m done|finished|all done|ok(ay)? (i'?m )?done|i did it)\s*[.!]*$/i;
 
 export const isExplicitYes = (text: string | null | undefined) => YES.test(String(text ?? ""));

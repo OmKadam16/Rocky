@@ -6,7 +6,7 @@ export type AgentDeps = {
   navigate: (url: string) => Promise<void>;
   history: (dir: "back" | "forward") => Promise<void>;
   input: (step: InputStep) => Promise<void>;
-  settle: (opts?: { minMs?: number; capMs?: number; afterType?: boolean }) => Promise<void>;
+  settle: (opts?: { minMs?: number; capMs?: number; afterType?: boolean; afterScroll?: boolean }) => Promise<void>;
   probe: () => Promise<Record<string, unknown>>;
   describePoint: (x: number, y: number) => Promise<Record<string, unknown> | null>;
   describeFocus: () => Promise<Record<string, unknown> | null>;
@@ -30,8 +30,12 @@ export class BookingRun {
   confirm(yes: boolean): boolean;
   continueRun(): boolean;
   cancel(message?: string): boolean;
+  trail(): Record<string, unknown>[];
 }
 export const OPENAI_RESPONSES_URL: string;
 export const VIEWPORT: Viewport;
 export function startUrlFor(task: unknown): string;
 export function toInputSteps(action: unknown, scale: { x: number; y: number }, viewport?: Viewport): InputStep[];
+export function isFinalClickTarget(target: unknown, contactTyped: boolean): boolean;
+export function overlayHit(target: unknown, viewport?: Viewport): string | null;
+export function isWatchedClick(target: unknown): boolean;

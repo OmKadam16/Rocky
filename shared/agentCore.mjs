@@ -272,6 +272,9 @@ function dataLeakReason(field, text, task) {
 
 const STRONG_FINAL =
   /\b(confirm|complete|finali[sz]e|submit|place|make)\b.{0,20}\b(reservation|booking|appointment|order|purchase|payment)\b|\bpay\b|^\s*(confirm|complete|submit|finish)\s*[!.]?\s*$/i;
+// "Request reservation" books just as finally as "Complete reservation",
+// even as a plain button outside any form — always needs the yes first.
+const REQUEST_FINAL = /\brequest\b.{0,20}\b(reservation|booking|appointment|order)\b/i;
 // "Reserve", "Book now", "Buy tickets" usually START a flow; they only count
 // as final once the user's contact details are in the form.
 const WEAK_FINAL = /\b(reserve|book|confirm|buy|purchase|submit)\b/i;
@@ -288,9 +291,36 @@ function isFinalClickTarget(target, contactTyped) {
   if (target.unresolvedFrame) return Boolean(contactTyped);
   const label = [target.text, target.ariaLabel, target.value].filter(Boolean).join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
   if (!label) return Boolean(contactTyped && target.isSubmit);
-  if (STRONG_FINAL.test(label)) return true;
+  if (STRONG_FINAL.test(label) || REQUEST_FINAL.test(label)) return true;
   if (contactTyped && (WEAK_FINAL.test(label) || target.isSubmit)) return true;
   return false;
+}
+
+/**
+ * A fixed overlay sitting over the click point (cookie banner, modal
+ * backdrop): large, viewport-fixed, and not itself interactive. POINT_JS
+ * reports the raw element's box for exactly this test. Returns a short
+ * label for the note, or null.
+ */
+function overlayHit(target, viewport = VIEWPORT) {
+  if (!target || typeof target !== "object") return null;
+  const box = target.overlay;
+  if (!box) return null;
+  const area = (Number(box.w) || 0) * (Number(box.h) || 0);
+  if (!(area >= viewport.width * viewport.height * 0.6)) return null;
+  const label = [target.text, target.ariaLabel].filter(Boolean).join(" ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return label || target.tag || "overlay";
+}
+
+/**
+ * Clicks worth a did-anything-change check: buttons, links, submits. Inputs,
+ * selects and labels are excluded — focusing a field or opening a dropdown
+ * legitimately changes nothing visible.
+ */
+function isWatchedClick(target) {
+  if (!target || typeof target !== "object" || target.unresolvedFrame) return false;
+  const tag = String(target.tag || "").toLowerCase();
+  return tag === "button" || tag === "a" || target.isSubmit === true;
 }
 
 const CONFIRMATION_WORDS =
@@ -668,8 +698,12 @@ class BookingRun {
     this.codeHinted = false;
     /** URL where a code was typed unmasked: no evidence screenshots there. */
     this.redactUrl = null;
+    /** An Enter keypress went through (may have submitted a form). */
+    this.enterPressed = false;
     this.notes = [];
     this.recent = [];
+    /** Per-run trace (step log + timings + notes, screenshots stripped). */
+    this.trail = [];
     this.lastStep = "";
     this.lastShot = null;
     this.acknowledged = new Set(); // takeover kinds the user already handled, per url
@@ -726,11 +760,23 @@ class BookingRun {
   }
 
   emit(e) {
+    const stamped = { ...e, at: this.deps.now() };
+    // The trace keeps everything except screenshot pixels. (Typed contact
+    // details never reach events: describeAction redacts them, and codes
+    // travel their own channel.)
+    const { screenshot, ...rest } = stamped;
+    this.trail.push({ ...rest, shot: screenshot != null });
+    if (this.trail.length > 500) this.trail.splice(0, this.trail.length - 500);
     try {
-      this.deps.emit({ ...e, at: this.deps.now() });
+      this.deps.emit(stamped);
     } catch {
       /* a closed renderer must not kill the run */
     }
+  }
+
+  /** The run's trace so far (JSON-safe, no screenshots, no typed data). */
+  trail() {
+    return this.trail.slice();
   }
 
   status(text) {
@@ -817,7 +863,7 @@ class BookingRun {
     return true;
   }
 
-  cancel(message = "Stopped. Nothing more will be clicked; the page is still open.") {
+  cancel(message = "Stopped. Nothing was booked.") {
     if (["done", "failed", "cancelled"].includes(this.state)) return false;
     this.closeStep();
     this.pauseClock();
@@ -1054,8 +1100,10 @@ class BookingRun {
     }
     if (this.state !== "running") return;
     // Typing into an autocomplete needs a beat for the suggestions to appear.
+    // After a scroll, wait out the animation so the screenshot isn't smeared.
     const typed = actionsOf(call).some((x) => x && x.type === "type");
-    await this.timed("settleMs", () => this.deps.settle({ afterType: typed }));
+    const scrolled = actionsOf(call).some((x) => x && x.type === "scroll");
+    await this.timed("settleMs", () => this.deps.settle({ afterType: typed, afterScroll: scrolled }));
     if (await this.checkPage()) {
       this.pending.computerCallId = call.call_id;
       this.pending.acknowledged = call.acknowledged || [];
@@ -1087,8 +1135,41 @@ class BookingRun {
     }
     const ctx = { task: this.task };
     if (a.type === "click" || a.type === "double_click") {
+      // No coordinates, no click: mapPoint would silently clamp to a corner.
+      const rx = Number(a.x);
+      const ry = Number(a.y);
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) {
+        return { blocked: "That click had no coordinates — aim at the control you meant." };
+      }
+      // Off-viewport aim (usually a stale position from before a scroll):
+      // never click blind at the clamped edge. Scroll toward the target so
+      // the next screenshot shows it, and ask for fresh coordinates.
+      if (rx < 0 || ry < 0 || rx >= this.viewport.width || ry >= this.viewport.height) {
+        const dx = Math.round(rx - this.viewport.width / 2);
+        const dy = Math.round(ry - this.viewport.height / 2);
+        await this.timed("actionMs", async () => {
+          for (const s of toInputSteps({ type: "scroll", x: this.viewport.width / 2, y: this.viewport.height / 2, scroll_x: dx, scroll_y: dy }, { x: 1, y: 1 }, this.viewport)) {
+            if (this.state !== "running") return;
+            await this.deps.input(s);
+          }
+        });
+        await this.timed("settleMs", () => this.deps.settle({ afterScroll: true }));
+        const where = ry >= this.viewport.height ? "below" : ry < 0 ? "above" : rx < 0 ? "left of" : "right of";
+        return { blocked: `Your click at (${Math.round(rx)}, ${Math.round(ry)}) was ${where} the visible page, so I scrolled toward it instead of clicking blindly. Click again with fresh coordinates from the new screenshot.` };
+      }
       const p = mapPoint(a.x, a.y, scale, this.viewport);
       ctx.target = await this.deps.describePoint(p.x, p.y).catch(() => null);
+      // Something covering the page (cookie banner, overlay): name it instead
+      // of clicking through it. Clicks on the layer's own controls (its
+      // Reject/close buttons) are deliberate and go through.
+      const tagName = String((ctx.target && ctx.target.tag) || "").toLowerCase();
+      const covering =
+        ["button", "a", "input", "select", "textarea", "label"].includes(tagName)
+          ? null
+          : overlayHit(ctx.target, this.viewport);
+      if (covering) {
+        return { blocked: `Your click would hit '${covering}' — that banner is covering the page, not the button you want. Dismiss it first with its least-permissive option (Reject / close), then click again with fresh coordinates.` };
+      }
       if (this.finalApproved) {
         // One yes buys exactly one click: the very next one.
         this.finalApproved = false;
@@ -1097,9 +1178,20 @@ class BookingRun {
         this.emit({ type: "step", n: this.steps, text: `held back from ${describeAction(a, ctx)} (needs your yes)`, blocked: true });
         return { blocked: "That click is blocked: it looks like the final booking/payment button. Call request_final_confirmation with a one-line summary first." };
       }
+      // Watch button-like clicks for an effect: same address and same content
+      // afterwards means the click did nothing (covered control, dead reload,
+      // already-applied toggle). Say so once, instead of looping silently.
+      if (isWatchedClick(ctx.target)) {
+        ctx.sigBefore = await this.pageSig().catch(() => null);
+      }
     }
     if (a.type === "keypress" && (a.keys || []).some((k) => /^(enter|return)$/i.test(k)) && this.contactTyped && !this.finalApproved) {
       return { blocked: "Enter is blocked once contact details are in the form: it could submit the booking. Click the button instead (and call request_final_confirmation before the final one)." };
+    }
+    if (a.type === "keypress" && (a.keys || []).some((k) => /^(enter|return)$/i.test(k))) {
+      // Allowed through (no contact typed yet): it may still submit the form,
+      // which counts as the run acting if confirmation follows.
+      this.enterPressed = true;
     }
     if (a.type === "type") {
       if (looksLikeCardNumber(a.text)) {
@@ -1144,7 +1236,18 @@ class BookingRun {
       }
       return false;
     });
-    return stopped ? { stop: true } : null;
+    if (stopped) return { stop: true };
+    // Watched click, nothing changed: say so once instead of looping
+    // silently (covered control, dead reload, already-applied toggle).
+    if (ctx.sigBefore) {
+      await this.timed("settleMs", () => this.deps.settle({ capMs: 800 }));
+      const after = await this.pageSig().catch(() => null);
+      if (after && after === ctx.sigBefore) {
+        const label = (ctx.target && (ctx.target.text || ctx.target.ariaLabel || ctx.target.value)) || describeAction(a, ctx);
+        this.notes.push(`That click on '${String(label).replace(/\s+/g, " ").trim().slice(0, 60)}' doesn't seem to have changed the page (same address, same content). If the button is below the fold or covered, scroll or dismiss first, then click again with fresh coordinates.`);
+      }
+    }
+    return null;
   }
 
   /** Login walls, CAPTCHAs, card fields, 2FA: stop and hand over. */
@@ -1189,6 +1292,13 @@ class BookingRun {
       { url: p.url || this.lastUrl || "", title: p.title || "", text: p.text || "", hasPassword: Boolean(p.hasPassword), channel, reason, phoneTyped: this.phoneTyped, emailTyped: this.emailTyped },
       this.task,
     );
+  }
+
+  /** Address + content signature for did-that-click-do-anything checks. */
+  async pageSig() {
+    const p = await this.deps.probe().catch(() => null);
+    if (!p) return null;
+    return [p.url || "", p.title || "", p.textLen ?? "", p.formState ?? ""].join("|");
   }
 
   /** A screenshot that may be shown/saved as evidence (null where a code may show). */
@@ -1312,7 +1422,7 @@ class BookingRun {
         const ev = verifyEvidence(text, { reference: args.reference, confirmation_text: args.confirmation_text });
         const shot = await this.shoot();
         if (!shot) return;
-        const acted = this.finalClicked || this.userActed;
+        const acted = this.finalClicked || this.userActed || this.enterPressed;
         const status = ev.ok && acted ? "booked" : "unclear";
         this.closeStep();
         this.pauseClock();
@@ -1360,6 +1470,11 @@ class BookingRun {
       case "open_url": {
         const url = str(args.url, 2000);
         if (!/^https?:\/\//i.test(url)) return out({ error: "http(s) URLs only." });
+        if (url === this.lastUrl) {
+          // Reloading the page you're on changes nothing the run can see;
+          // the no-change note would say the same a turn later. Skip the load.
+          return out({ ok: true, note: "Already on that page — no reload done. If the content looks stale, use the page's own retry control instead of reopening the URL." });
+        }
         try {
           await this.timed("navMs", () => this.deps.navigate(url));
           this.lastStep = `opened ${url.replace(/^https?:\/\//, "").slice(0, 60)}`;
@@ -1399,6 +1514,8 @@ export {
   fieldPurpose,
   dataLeakReason,
   isFinalClickTarget,
+  overlayHit,
+  isWatchedClick,
   verifyEvidence,
   knownAnswer,
   scaleFor,

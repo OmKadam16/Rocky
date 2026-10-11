@@ -115,6 +115,21 @@ export function createBrowserDriver(browser: AgentBrowser, opts: { sleep?: (ms: 
       }
     },
     settle: async (o = {}) => {
+      if (o.afterScroll) {
+        // Same as desktop: don't shoot mid-scroll. Wait for the scroll
+        // position to hold still (well under a second).
+        let last: string | null = null;
+        let still = now();
+        const t0 = now();
+        for (;;) {
+          const pos = await evalJson<string>(P.SCROLL_POS_JS).catch(() => null);
+          const t = now();
+          if (pos != null && pos === last && t - still >= 150) break;
+          if (pos !== last) { last = pos; still = t; }
+          if (t - t0 > 1200) break;
+          await sleep(60);
+        }
+      }
       const start = now();
       const minMs = o.minMs ?? (o.afterType ? 300 : 120);
       const cap = o.capMs ?? P.SETTLE_CAP_MS;

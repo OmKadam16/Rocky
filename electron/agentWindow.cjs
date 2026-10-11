@@ -20,6 +20,7 @@
  * (final evidence, saved in Dexie on this laptop).
  */
 const { BaseWindow, WebContentsView, ipcMain, session: electronSession } = require("electron");
+const fs = require("node:fs");
 const core = require("./agentCore.cjs");
 
 const BANNER_H = 40;
@@ -62,6 +63,7 @@ const {
   MARK_FOCUSED_JS,
   MASK_CSS,
   TEXT_JS,
+  SCROLL_POS_JS,
 } = require("../shared/agentPageScripts.mjs");
 
 /**
@@ -383,6 +385,21 @@ function createAgentController(deps, options = {}) {
    */
   async function settle(opts = {}) {
     const wc = siteWc();
+    if (opts.afterScroll) {
+      // Screenshots taken mid-scroll read as a smeared page and burn a model
+      // turn. Wait for the scroll position to hold still (well under a second).
+      let last = null;
+      let still = Date.now();
+      const t0 = Date.now();
+      for (;;) {
+        const pos = await evalMain(SCROLL_POS_JS).catch(() => null);
+        const now = Date.now();
+        if (pos != null && pos === last && now - still >= 150) break;
+        if (pos !== last) { last = pos; still = now; }
+        if (now - t0 > 1200) break;
+        await sleep(60);
+      }
+    }
     const start = Date.now();
     const minMs = opts.minMs ?? (opts.afterType ? 300 : 120);
     const cap = opts.capMs ?? SETTLE_CAP_MS;
@@ -456,6 +473,16 @@ function createAgentController(deps, options = {}) {
   }
 
   function emit(e) {
+    // Per-run trace file (JSONL, screenshots stripped): step log, timings,
+    // notes and pauses for diagnosing slow or stuck runs after the fact.
+    if (options.traceFile) {
+      try {
+        const { screenshot, ...rest } = e;
+        fs.appendFileSync(options.traceFile, `${JSON.stringify({ ...rest, at: Date.now(), shot: screenshot != null })}\n`);
+      } catch {
+        /* tracing never breaks a run */
+      }
+    }
     if (e.type === "timing") {
       const t = e.step;
       console.log(`[agent] step ${t.n}: total ${t.totalMs}ms (model ${t.modelMs}, screenshot ${t.screenshotMs}, action ${t.actionMs}, settle ${t.settleMs}, nav ${t.navMs}, shot ${t.shotKb}KB)`);

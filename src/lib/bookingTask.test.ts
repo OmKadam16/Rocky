@@ -131,7 +131,10 @@ describe("control words the code checks", () => {
     expect(isExplicitNo("no")).toBe(true);
     expect(isExplicitNo("nope, cancel")).toBe(true);
     expect(isStop("stop")).toBe(true);
+    expect(isStop("never mind")).toBe(true);
+    expect(isStop("nevermind.")).toBe(true);
     expect(isStop("stop the music and book at 8")).toBe(false);
+    expect(isStop("never mind, book at 8")).toBe(false);
     expect(isContinue("continue")).toBe(true);
     expect(isContinue("I'm done")).toBe(true);
   });

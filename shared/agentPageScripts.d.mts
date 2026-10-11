@@ -15,3 +15,4 @@ export const BOX_LEN_JS: (i: number) => string;
 export const MARK_FOCUSED_JS: string;
 export const MASK_CSS: string;
 export const TEXT_JS: string;
+export const SCROLL_POS_JS: string;
