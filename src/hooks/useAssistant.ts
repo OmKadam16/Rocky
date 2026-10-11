@@ -8,7 +8,7 @@ import { startThinkingAck, type ThinkingAck } from "../lib/thinkingAck";
 import { describeFailure, logFailure } from "../lib/netErrors";
 import { speakableTimes } from "../lib/clockTalk";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
-import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
+import { clearChat as clearStoredChat, deleteTurn, loadChat, saveTurn, shouldPersist } from "../lib/chatHistory";
 import { foldIntoSummary } from "../lib/chatMemory";
 import { memoryBridge } from "../lib/memoryClient";
 import { completeWithPlanner } from "../lib/plannerLocal";
@@ -174,10 +174,16 @@ export async function routeAgentTurn(text: string): Promise<{ planner: boolean; 
 export type AssistantOptions = {
   /** Keep the chat in local history (Dashboard chat). Off for the phone and side panel. */
   persist?: boolean;
+  /**
+   * Also persist private turns (Memory Q&A, receipts). The laptop's own chat
+   * does; the phone never does: there they live for the session only.
+   */
+  keepPrivate?: boolean;
 };
 
 export function useAssistant(onScheduleChange: () => void, options: AssistantOptions = {}) {
   const persist = options.persist === true;
+  const keepPrivate = options.keepPrivate !== false;
   const [state, setState] = useState<AssistantState>("idle");
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [caption, setCaption] = useState("");
@@ -197,9 +203,9 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
     const full: AssistantTurn = { ...turn, id: nextId(), at: Date.now() };
     turnsRef.current = [...turnsRef.current, full];
     setTurns(turnsRef.current);
-    if (persist) void saveTurn(full);
+    if (persist && shouldPersist(full, keepPrivate)) void saveTurn(full);
     return full;
-  }, [persist]);
+  }, [persist, keepPrivate]);
 
   // Persisted chat: earlier turns come back on load (oldest first).
   useEffect(() => {
@@ -347,7 +353,8 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
           // The planner routed it to Memory: show the local answer, privately,
           // and keep the question out of the planner's history from now on.
           turnsRef.current = turnsRef.current.map((t) => (t.id === userTurn.id ? { ...t, private: true } : t));
-          if (persist) void saveTurn({ ...userTurn, private: true });
+          if (persist && keepPrivate) void saveTurn({ ...userTurn, private: true });
+          else if (persist) void deleteTurn(userTurn.id);
           push({ role: "assistant", text: "", private: true, card: memoryCard });
           await endCapture();
           if (speakReply) {

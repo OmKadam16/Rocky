@@ -44,6 +44,19 @@ export async function saveTurn(turn: AssistantTurn): Promise<void> {
   }
 }
 
+/** Should this turn be written to the device's history? Private turns only where allowed. */
+export function shouldPersist(turn: Pick<AssistantTurn, "private">, keepPrivate: boolean): boolean {
+  return keepPrivate || !turn.private;
+}
+
+export async function deleteTurn(id: string): Promise<void> {
+  try {
+    await store().messages.delete(id);
+  } catch {
+    /* nothing stored */
+  }
+}
+
 export async function clearChat(): Promise<void> {
   try {
     await store().messages.clear();
