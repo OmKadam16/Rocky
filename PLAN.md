@@ -157,6 +157,36 @@ Goal: no API keys in the browser for the demo.
   "I have a chem exam Friday, plan study time" → laptop updates live → Memory question → done.
 - Rehearse with Wi-Fi only (Supabase + AI need internet; Memory works offline).
 
+### Phase 8: Booking Agent v2 (real bookings from voice)
+Goal: "book a barber Saturday at 3" really books it. Rocky drives a visible browser window
+with GPT-5.4 computer use (`browser_key`), asks the user for anything it needs mid-run
+(pause/resume in the same page), and only clicks the final button after a spoken/tapped yes.
+Planner stays on `llm_key` and never reads `browser_key`. No schema change, no migration.
+- [x] Core loop in the Electron main process (`electron/agentCore.cjs`): Responses API
+      `computer` tool (screenshot → actions → screenshot), `previous_response_id` chaining,
+      tools ask_user / request_final_confirmation / report_booked / handoff_to_user /
+      open_url / give_up. Code-enforced gates: final click needs a recorded yes (one yes = one
+      click), never types card/CVV/password/2FA/ID, CAPTCHA/login/payment/deposit → user
+      takeover, user data only into the matching field, "booked" needs confirmation text on the
+      page, limits (40 steps, 6 active minutes, screenshots, repeated-action loop). Unit tests in
+      `electron/agentCore.test.mjs`.
+- [ ] Agent window (fixed 1280x800 site view + "Rocky is driving" banner with Stop),
+      capturePage screenshots, sendInputEvent input, IPC start/answer/confirm/continue/cancel.
+- [ ] Fake multi-step booking site (`electron/test/fixtures`) + scripted-model Electron run.
+- [ ] Generic task types (restaurant / appointment / tickets) and slots; planner tools
+      find_place, propose_booking, book_appointment, answer_agent_question, continue_agent.
+- [ ] Laptop UI: question card, Confirm/Cancel/Stop, status, activity log; voice in/out.
+- [ ] Phone relay through the existing `commands` table (short status/question text only).
+- [ ] Local booking records (Dexie, laptop only) + reference on the calendar block.
+- [ ] Om: one real low-stakes free booking with the window visible.
+
+Docs check (OpenAI computer-use guide + API reference, 2026-10-10): the GA tool is
+`{ type: "computer" }` with no display size or environment fields; a `computer_call` carries an
+ordered `actions` array (batched), not one `action`; screenshots go back as
+`computer_call_output` with `detail: "original"`; safety checks arrive as
+`pending_safety_checks` and are echoed back as `acknowledged_safety_checks` only after the user
+approves. The guide's examples use newer models; `gpt-5.4` still lists computer use.
+
 ---
 
 ## 6. Do not build
@@ -244,3 +274,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   `vc-debug=1` in localStorage) plus a console line; preferences ride the snapshot (one
   fewer database round-trip); typed sends stay silent (text up, turn idle immediately)
   instead of waiting on speech synthesis — mic turns and yes/cancel still speak.
+- 2026-10-10: Booking Agent v2 started (Phase 8): main-process computer-use core with code-enforced safety gates and limits, 35 unit tests. Not wired to the app yet.
