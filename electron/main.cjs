@@ -532,6 +532,7 @@ app.whenReady().then(async () => {
   registerPower();
   registerSecretHandlers();
   registerBrowserHandlers();
+  require("./voiceProxy.cjs").registerVoiceProxy(ipcMain, (url, opts) => net.fetch(url, opts));
   require("./memoryMain.cjs").registerMemory();
   registerShell();
   registerUpdates();

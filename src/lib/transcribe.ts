@@ -1,5 +1,6 @@
 import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
 import { getSecret } from "./secrets";
+import { proxyTranscribe, voiceProxyAvailable } from "./voiceBridge";
 
 /**
  * Voice input. Records one turn locally, waits out real pauses rather than
@@ -122,6 +123,26 @@ export function startTranscription(
       form.append("model_id", TRANSCRIBE_MODEL);
       form.append("language_code", (navigator.language || "en-US").slice(0, 2));
 
+      // Desktop: the bytes go over IPC and main posts the upload (the
+      // renderer fetch stack was dropping full-size turns). Same endpoint,
+      // same key, same retry + messages. Browsers keep the direct path.
+      if (voiceProxyAvailable()) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const text = (
+          await withNetRetry(() =>
+            proxyTranscribe({
+              key,
+              audio: bytes,
+              mime: blob.type || "audio/webm",
+              fileName: fileNameFor(blob),
+              language: (navigator.language || "en-US").slice(0, 2),
+            }),
+          )
+        ).trim();
+        if (text) handlers.onFinal(text);
+        return;
+      }
+
       const response = await withNetRetry(() =>
         fetch(TRANSCRIBE_URL, {
           method: "POST",
@@ -154,7 +175,13 @@ export function startTranscription(
         return;
       }
       stream = granted;
-      recorder = new MediaRecorder(granted);
+      // 32 kbps is plenty for speech-to-text and keeps uploads ~4x smaller
+      // than the browser default, which was dropping on some networks.
+      try {
+        recorder = new MediaRecorder(granted, { audioBitsPerSecond: 32000 });
+      } catch {
+        recorder = new MediaRecorder(granted);
+      }
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data);
       };

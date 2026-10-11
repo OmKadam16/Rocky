@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld("rocky", {
   shell: {
     openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   },
+  voice: {
+    /** Desktop only: transcription runs in main (the renderer upload path kept failing). Absent in browsers. */
+    transcribe: (args) => ipcRenderer.invoke("voice:transcribe", args),
+  },
   agent: {
     /** Only defined on desktop: the planner hands over a link everywhere else. */
     available: () => ipcRenderer.invoke("agent:available"),
