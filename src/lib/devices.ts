@@ -18,14 +18,47 @@ export type PairFailureKind =
   | "expired" // P0001: code past pair_expires_at
   | "wrong" // P0002: no active code for this account
   | "not-signed-in" // 28000 / 401 / 42501: no usable session
+  | "no-laptop" // P0002 and this account has no laptop row at all
+  | "no-code" // P0002 and the laptop row has no active code
   | "unknown"; // anything else — UI shows error.message in small text
 
 export class PairError extends Error {
   kind: PairFailureKind;
-  constructor(kind: PairFailureKind, message: string) {
+  /** The raw Postgres / PostgREST errcode, for the connection check. */
+  code: string | null;
+  constructor(kind: PairFailureKind, message: string, code: string | null = null) {
     super(message);
     this.kind = kind;
+    this.code = code;
   }
+}
+
+/** Plain words for each pairing failure (phone pair flow + connection check). */
+export function pairFailureCopy(kind: PairFailureKind): { title: string; body: string } {
+  switch (kind) {
+    case "wrong":
+      return { title: "Wrong code", body: "That code doesn't match your laptop. Check the 8 characters under Profile → Devices on the laptop and type them again." };
+    case "expired":
+      return { title: "Code expired", body: "That code has expired. Open Profile → Devices on the laptop to get the current one." };
+    case "not-signed-in":
+      return { title: "Not signed in", body: "Your sign-in expired. Sign in again on this phone — the code is kept." };
+    case "no-laptop":
+      return { title: "No laptop on this account", body: "This account has no laptop yet. Open Rocky on your laptop, signed in with this same account, and go to Profile → Devices." };
+    case "no-code":
+      return { title: "No code on the laptop", body: "Your laptop has no active code. Open Profile → Devices on the laptop so it shows one, then try again." };
+    default:
+      return { title: "Something went wrong", body: "The server answered with an error. Your laptop is not necessarily offline." };
+  }
+}
+
+/**
+ * Narrow a P0002 ("not active for this account") down using this account's
+ * own laptop row: none at all, no active code, or simply a wrong code.
+ */
+export function refineWrongCode(laptop: { pair_code: string | null } | null): PairFailureKind {
+  if (!laptop) return "no-laptop";
+  if (!laptop.pair_code) return "no-code";
+  return "wrong";
 }
 
 /** Map a Postgres/PostgREST errcode to a failure kind (null = unknown). */
@@ -52,7 +85,7 @@ export interface DbLikeError {
 /** Build a PairError from a DB/PostgREST error, preserving the message. */
 export function mapPairFailure(error: DbLikeError): PairError {
   const kind = mapDbErrcode(error.code ?? null) ?? "unknown";
-  return new PairError(kind, error.message);
+  return new PairError(kind, error.message, error.code ?? null);
 }
 
 export interface ClaimPairResult {
@@ -77,7 +110,14 @@ export async function claimPair(code: string, phoneName: string): Promise<ClaimP
     throw new PairError("not-signed-in", "No session — sign in first.");
   }
   const { data, error } = await sb.rpc("claim_pair", { code, phone_name: phoneName });
-  if (error) throw mapPairFailure(error);
+  if (error) {
+    const failure = mapPairFailure(error);
+    if (failure.kind === "wrong") {
+      const { laptop } = await readPairDevices().catch(() => ({ laptop: null }));
+      failure.kind = refineWrongCode(laptop);
+    }
+    throw failure;
+  }
   const row = data as { laptop_name?: string; laptop_device_id?: string; phone_device_id?: string } | null;
   return {
     laptopName: row?.laptop_name ?? "your laptop",
@@ -124,6 +164,17 @@ export async function touchLaptopHeartbeat(): Promise<boolean> {
     return !error;
   } catch {
     return false; // offline: fetch throws
+  }
+}
+
+/** Phone: refresh its own last_seen (shown on the laptop's Devices section). */
+export async function touchPhoneSeen(): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase().from("devices").update({ last_seen: new Date().toISOString() }).eq("role", "phone");
+    return !error;
+  } catch {
+    return false;
   }
 }
 
@@ -392,4 +443,39 @@ export function deviceOnline(lastSeen: string | null, nowMs: number): boolean {
   const ms = Date.parse(lastSeen);
   if (Number.isNaN(ms)) return false;
   return nowMs - ms <= LAPTOP_OFFLINE_AFTER_SEC * 1000;
+}
+
+// ---------------------------------------------------------------------------
+// Laptop self-check: is the live project ready for 8-char static codes?
+// ---------------------------------------------------------------------------
+
+/** Migration 0004, to paste in the Supabase SQL editor. */
+export const PAIR_CODE_8_SQL = `alter table public.devices drop constraint if exists devices_pair_code_check;
+alter table public.devices
+  add constraint devices_pair_code_check
+  check (pair_code ~ '^[ABCDEFGHJKMNPQRSTVWXYZ2-9]{6}([ABCDEFGHJKMNPQRSTVWXYZ2-9]{2})?$');`;
+
+export interface PairSchemaWarning {
+  message: string;
+  sql: string | null;
+}
+
+/**
+ * Devices-section self-check after publishing the code: the constraint
+ * rejecting 8 chars (0004 missing) or an old 6-char code on the row.
+ */
+export function pairSchemaCheck(laptopCode: string | null, publishError: { code?: string | null; message: string } | null): PairSchemaWarning | null {
+  if (publishError && (publishError.code === "23514" || /devices_pair_code_check/.test(publishError.message))) {
+    return {
+      message: "Supabase rejected the 8-character code: migration 0004 isn't applied on this project. Run this in the Supabase SQL editor, then press Retry:",
+      sql: PAIR_CODE_8_SQL,
+    };
+  }
+  if (laptopCode && laptopCode.replace(/[^A-Z0-9]/gi, "").length === 6) {
+    return {
+      message: "This laptop still has an old 6-character code. Rotate the code to get an 8-character one. If rotating fails, run this in the Supabase SQL editor first:",
+      sql: PAIR_CODE_8_SQL,
+    };
+  }
+  return null;
 }

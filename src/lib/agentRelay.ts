@@ -27,7 +27,11 @@ export type RelayOp =
   | { op: "answer"; text: string }
   | { op: "confirm"; yes: boolean }
   | { op: "continue" }
-  | { op: "cancel" };
+  | { op: "cancel" }
+  /** Connection check: the laptop answers at once, nothing else happens. */
+  | { op: "ping" }
+  /** Connection check: the phone tells the laptop how long the last ping took. */
+  | { op: "report"; ms: number; phone: string };
 
 const clip = (s: unknown, n: number) => String(s ?? "").slice(0, n);
 
@@ -77,9 +81,30 @@ export function parseRequest(diff: unknown): RelayOp | null {
       return { op: "continue" };
     case "cancel":
       return { op: "cancel" };
+    case "ping":
+      return { op: "ping" };
+    case "report":
+      return typeof d.ms === "number" && Number.isFinite(d.ms) ? { op: "report", ms: Math.max(0, Math.round(d.ms)), phone: clip(d.phone, 40) } : null;
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Last phone ping, shown on the laptop's Devices section.
+// ---------------------------------------------------------------------------
+
+export type PhonePing = { at: number; ms: number; phone: string };
+let lastPhonePing: PhonePing | null = null;
+const pingListeners = new Set<(p: PhonePing) => void>();
+export const getLastPhonePing = () => lastPhonePing;
+export function onPhonePing(fn: (p: PhonePing) => void): () => void {
+  pingListeners.add(fn);
+  return () => void pingListeners.delete(fn);
+}
+function recordPhonePing(p: PhonePing) {
+  lastPhonePing = p;
+  pingListeners.forEach((fn) => fn(p));
 }
 
 type Row = { id: string; source: string; text: string | null; status: string; diff: unknown; reply_text: string | null; created_at: string };
@@ -112,6 +137,11 @@ async function runRequest(op: RelayOp): Promise<{ ok: boolean; error?: string }>
       return { ok: await continueAgent() };
     case "cancel":
       return { ok: await cancelAgent() };
+    case "ping":
+      return { ok: true };
+    case "report":
+      recordPhonePing({ at: Date.now(), ms: op.ms, phone: op.phone });
+      return { ok: true };
   }
 }
 
@@ -128,7 +158,9 @@ export function startAgentRelayHost(): () => void {
     }
     const op = parseRequest(row.diff);
     const result = op ? await runRequest(op).catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "bad request" };
-    await sb.from("commands").update({ status: "done", reply_text: JSON.stringify(result) }).eq("id", row.id);
+    // A report needs no answer: its row goes right away.
+    if (op?.op === "report") await sb.from("commands").delete().eq("id", row.id);
+    else await sb.from("commands").update({ status: "done", reply_text: JSON.stringify(result) }).eq("id", row.id);
   };
   const channel = sb
     .channel(uniqueChannel("rocky-agent-host"))
@@ -162,15 +194,15 @@ export function startAgentRelayHost(): () => void {
 // Phone: a relay backend for agentClient, and the laptop's events.
 // ---------------------------------------------------------------------------
 
-async function send(op: RelayOp): Promise<{ ok: boolean; error?: string }> {
+async function send(op: RelayOp, timeoutMs = RELAY_TIMEOUT_MS, pollMs = 700): Promise<{ ok: boolean; error?: string }> {
   const sb = supabase();
   const { data, error } = await sb.from("commands").insert({ source: "phone", kind: "text", text: REQUEST_MARK, status: "queued", diff: op as unknown as Record<string, unknown> }).select("id").single();
   if (error || !data) return { ok: false, error: "Couldn't reach your laptop." };
   const id = (data as { id: string }).id;
-  const deadline = Date.now() + RELAY_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   try {
     while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 700));
+      await new Promise((r) => setTimeout(r, pollMs));
       const { data: row } = await sb.from("commands").select("status, reply_text").eq("id", id).maybeSingle();
       const r = row as { status: string; reply_text: string | null } | null;
       if (r && r.status === "done") {
@@ -189,6 +221,23 @@ async function send(op: RelayOp): Promise<{ ok: boolean; error?: string }> {
     // The phone's own rows go as soon as they're answered (or time out).
     void sb.from("commands").delete().eq("id", id);
   }
+}
+
+/**
+ * Connection check (phone): a harmless ping through the commands relay,
+ * timed until the laptop marks it done. The time is then reported to the
+ * laptop (fire and forget) for its Devices section.
+ */
+export async function pingLaptop(phoneName: string, timeoutMs = 8000): Promise<{ ok: boolean; ms?: number; error?: string }> {
+  const t0 = performance.now();
+  const r = await send({ op: "ping" }, timeoutMs, 150);
+  if (!r.ok) return { ok: false, error: r.error ?? "No answer from the laptop." };
+  const ms = Math.round(performance.now() - t0);
+  void supabase()
+    .from("commands")
+    .insert({ source: "phone", kind: "text", text: REQUEST_MARK, status: "queued", diff: { op: "report", ms, phone: phoneName.slice(0, 40) } })
+    .then(() => {}, () => {});
+  return { ok: true, ms };
 }
 
 export function startAgentRelayClient(): () => void {

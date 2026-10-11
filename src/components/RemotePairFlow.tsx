@@ -12,10 +12,14 @@ import {
 import {
   claimPair,
   LAPTOP_ASLEEP_MESSAGE,
+  pairFailureCopy,
   PairError,
+  type PairFailureKind,
   readLaptopLastSeen,
 } from "../lib/devices";
 import { currentUserId } from "../lib/supabase";
+import { connectionProbes } from "../lib/connectionCheck";
+import ConnectionCheck from "./ConnectionCheck";
 
 const PAIR_STORE_KEY = "vc-remote-pair";
 
@@ -38,9 +42,17 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   const [state, setState] = useState<PhonePairState>("intro");
   const [code, setCode] = useState("");
   const [genericMsg, setGenericMsg] = useState<string | null>(null);
+  const [failKind, setFailKind] = useState<PairFailureKind>("wrong");
+  /** The last claim's outcome, for the connection check. */
+  const [lastClaim, setLastClaim] = useState<{ ok: true } | { ok: false; kind: PairFailureKind; code: string | null; message: string } | null>(null);
   const [laptopName, setLaptopName] = useState("your laptop");
   const [phoneName] = useState(() => defaultPhoneName());
   const confirmTimer = useRef<number | null>(null);
+  const lastClaimRef = useRef(lastClaim);
+  lastClaimRef.current = lastClaim;
+  const [probes] = useState(() => connectionProbes(phoneName, () => lastClaimRef.current));
+  /** Bumped on every failed attempt: the check runs and opens itself. */
+  const [failCount, setFailCount] = useState(0);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -83,10 +95,14 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
       setGenericMsg(null);
       setState("confirming");
       buzz(15);
-      const fail = (kind: PhonePairState) => setState(kind);
+      const fail = (kind: PhonePairState) => {
+        setState(kind);
+        setFailCount((n) => n + 1);
+      };
       const failGeneric = (message: string) => {
         setGenericMsg(message);
         setState("generic");
+        setFailCount((n) => n + 1);
       };
       const done = (name: string) => {
         setLaptopName(name);
@@ -107,6 +123,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
           const presence = await readLaptopLastSeen().catch(() => null);
           if (!presence || Date.now() - presence.lastSeenMs > LAPTOP_OFFLINE_AFTER_SEC * 1000) {
             setState("offline");
+            setFailCount((n) => n + 1);
           } else {
             failGeneric("The laptop didn’t answer in time. Keep Rocky open on the laptop and try again.");
           }
@@ -132,15 +149,19 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
         }
         const r = await claimPair(normalized, phoneName);
         clearTimer();
+        setLastClaim({ ok: true });
         done(r.laptopName);
       } catch (e) {
         clearTimer();
         // Mapped by Postgres errcode — never string-sniffed, and an
         // unrecognized error is NEVER shown as "laptop offline".
         if (e instanceof PairError) {
+          setLastClaim({ ok: false, kind: e.kind, code: e.code, message: e.message });
           if (e.kind === "expired") fail("expired");
-          else if (e.kind === "wrong") fail("wrong");
-          else if (e.kind === "not-signed-in") failGeneric("Your sign-in expired. Sign in again — the code is kept.");
+          else if (e.kind === "wrong" || e.kind === "no-laptop" || e.kind === "no-code") {
+            setFailKind(e.kind);
+            fail("wrong");
+          } else if (e.kind === "not-signed-in") failGeneric(pairFailureCopy("not-signed-in").body);
           else failGeneric(e.message);
         } else {
           failGeneric(e instanceof Error ? e.message : "Something went wrong claiming the code.");
@@ -156,8 +177,8 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   })();
 
   const errMeta: Record<string, { title: string; body: string }> = {
-    expired: { title: "That code isn't active", body: "Check the code on the laptop (Profile → Devices) — each account has one code that doesn't change." },
-    wrong: { title: "Different account", body: "This phone must be signed in with the same account as your laptop." },
+    expired: pairFailureCopy("expired"),
+    wrong: pairFailureCopy(failKind),
     offline: { title: "Laptop asleep", body: LAPTOP_ASLEEP_MESSAGE },
   };
   const err = state === "expired" || state === "wrong" || state === "offline" ? errMeta[state] : null;
@@ -244,6 +265,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
             Pair this phone
           </button>
           <p className="text-center font-mono text-[10.5px] tracking-tab uppercase text-grey-faint">Pairing as {phoneName} · one code per account</p>
+          <ConnectionCheck probes={probes} runKey={failCount || null} />
         </div>
       )}
 
@@ -283,6 +305,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
               Back
             </button>
           </div>
+          <ConnectionCheck probes={probes} runKey={failCount || null} />
         </div>
       )}
 
@@ -299,6 +322,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
               Back
             </button>
           </div>
+          <ConnectionCheck probes={probes} runKey={failCount || null} />
         </div>
       )}
         </motion.div>

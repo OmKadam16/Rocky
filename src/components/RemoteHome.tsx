@@ -10,10 +10,15 @@ import { hasLocalAgent } from "../lib/agentClient";
 import { startAgentRelayClient } from "../lib/agentRelay";
 import { useAgentView } from "../hooks/useAgentView";
 import AgentCard from "./AgentCard";
+import ConnectionCheck from "./ConnectionCheck";
+import { connectionProbes } from "../lib/connectionCheck";
+import { defaultPhoneName } from "../lib/pairing";
 import { todayISO } from "../lib/schedule";
 import { addDays, longLabel, mondayOf, parseISODate, weekDates, WEEKDAY_SHORT } from "../../shared/datetime";
 import {
+  LAPTOP_ASLEEP_MESSAGE,
   readPhoneDevice,
+  touchPhoneSeen,
   unpairPhone,
   updateLaptopName,
   useLaptopPresence,
@@ -60,6 +65,13 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
     el.scrollTo({ left: selectedWeekIdx * el.clientWidth, behavior: "smooth" });
   }, [selectedWeekIdx]);
   const presence = useLaptopPresence(true);
+  const [probes] = useState(() => connectionProbes(defaultPhoneName()));
+  // The laptop's Devices section shows when this phone was last seen.
+  useEffect(() => {
+    void touchPhoneSeen();
+    const id = window.setInterval(() => void touchPhoneSeen(), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
   const assistant = useAssistant(() => void refresh());
   // Phone: the booking agent runs on the laptop; this relays to it.
   useEffect(() => {
@@ -168,6 +180,15 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
       </div>
 
       <div className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto px-5 pb-48 pt-4 [-webkit-overflow-scrolling:touch]">
+        <div className="mb-3 flex flex-col gap-2">
+          {presence.status === "offline" && (
+            <div role="status" className="rounded-[3px] border border-line bg-card px-3 py-2 text-13 text-warm">
+              {LAPTOP_ASLEEP_MESSAGE}
+            </div>
+          )}
+          {/* Runs once when the home opens; opens itself only on a problem. */}
+          <ConnectionCheck probes={probes} runKey={1} />
+        </div>
         {loading ? (
           <div className="font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
         ) : error ? (

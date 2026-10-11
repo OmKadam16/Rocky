@@ -4,6 +4,7 @@ import { setSecret } from "../lib/secrets";
 import {
   deviceOnline,
   formatSeenAgo,
+  pairSchemaCheck,
   readPairDevices,
   unpairPhone,
   publishLaptopPairing,
@@ -19,6 +20,7 @@ import {
 } from "../lib/pairing";
 import { detectPairClaim } from "../lib/pairClaim";
 import PhoneUrlLine from "./PhoneUrlLine";
+import { getLastPhonePing, onPhonePing, type PhonePing } from "../lib/agentRelay";
 
 type Status = "waiting" | "confirming" | "connected" | "offline";
 
@@ -60,6 +62,8 @@ export default function DevicesSection() {
   const [confirmAction, setConfirmAction] = useState<null | "code" | "keys">(null);
   const [rotateBusy, setRotateBusy] = useState(false);
   const [rotateMsg, setRotateMsg] = useState<string | null>(null);
+  const [lastPing, setLastPing] = useState<PhonePing | null>(() => getLastPhonePing());
+  useEffect(() => onPhonePing(setLastPing), []);
   const createdAt = useRef(Date.now());
   const timers = useRef<number[]>([]);
   const taps = useRef<number[]>([]);
@@ -151,12 +155,17 @@ export default function DevicesSection() {
     };
   }, [code, codeReady, published, publishError, epoch]);
 
-  // Fresh "seen ago" labels without hitting the relay.
+  // Fresh "seen ago" labels; the rows themselves are re-read every 30 s so
+  // the phone's last seen stays current.
   useEffect(() => {
-    if (!devices.laptop && !devices.phone) return;
-    const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
+    if (!isSupabaseConfigured) return;
+    let n = 0;
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+      if (++n % 3 === 0) void readPairDevices().then((r) => (r.laptop || r.phone) && setDevices(r)).catch(() => {});
+    }, 10_000);
     return () => window.clearInterval(id);
-  }, [devices.laptop, devices.phone]);
+  }, []);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
@@ -276,6 +285,16 @@ export default function DevicesSection() {
         <div className="mt-[6px] font-mono text-[10.5px] leading-[1.5] text-grey-soft text-pretty">
           {meta.title} — {meta.body}
         </div>
+        {(() => {
+          // Self-check: is the live project ready for 8-char static codes?
+          const w = codeReady ? pairSchemaCheck(code || null, publishError) : null;
+          return w ? (
+            <div role="alert" className="mt-3 rounded-[3px] border border-line bg-panel px-3 py-2">
+              <div className="font-mono text-[10.5px] leading-[1.5] text-warm">{w.message}</div>
+              {w.sql && <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[10.5px] text-ink">{w.sql}</pre>}
+            </div>
+          ) : null;
+        })()}
         {publishError ? (
           <div className="mt-3">
             <div className="font-mono text-[10.5px] leading-[1.5] text-warm">
@@ -444,7 +463,10 @@ export default function DevicesSection() {
                     />
                     <span className="truncate">{devices.phone.name ?? "Phone"}</span>
                   </span>
-                  <span className="font-mono text-[10.5px] text-grey-soft">Phone · {formatSeenAgo(devices.phone.last_seen, nowMs)}</span>
+                  <span className="font-mono text-[10.5px] text-grey-soft">
+                    Phone · {formatSeenAgo(devices.phone.last_seen, nowMs)}
+                    {lastPing ? ` · last ping ${lastPing.ms} ms, ${formatSeenAgo(new Date(lastPing.at).toISOString(), nowMs)}` : " · no ping yet"}
+                  </span>
                 </span>
                 <button
                   type="button"
