@@ -20,6 +20,7 @@ import {
 } from "../lib/pairing";
 import { detectPairClaim } from "../lib/pairClaim";
 import PhoneUrlLine from "./PhoneUrlLine";
+import { loadPhoneMemoryAllowed, phoneMemoryAllowed, setPhoneMemoryAllowed } from "../lib/phoneMemorySetting";
 import { getLastPhonePing, onPhonePing, type PhonePing } from "../lib/agentRelay";
 
 type Status = "waiting" | "confirming" | "connected" | "offline";
@@ -486,6 +487,41 @@ export default function DevicesSection() {
           )}
         </div>
       )}
+      <PhoneMemoryRow />
+    </div>
+  );
+}
+
+/** "Allow Memory questions from my phone": the laptop refuses relayed questions when off. */
+function PhoneMemoryRow() {
+  const [on, setOn] = useState(() => phoneMemoryAllowed());
+  useEffect(() => {
+    void loadPhoneMemoryAllowed().then(setOn);
+  }, []);
+  return (
+    <div className="rounded-[3px] border border-line px-[18px] py-[15px]">
+      <div className="flex items-center gap-[14px]">
+        <div className="min-w-0 flex-1 text-[15px] text-ink">Allow Memory questions from my phone</div>
+        <div className="flex flex-none gap-2">
+          {[true, false].map((v) => (
+            <button
+              key={String(v)}
+              type="button"
+              aria-pressed={on === v}
+              onClick={() => {
+                setOn(v);
+                void setPhoneMemoryAllowed(v).catch(() => {});
+              }}
+              className={`cursor-pointer rounded-[3px] border px-[10px] py-[5px] font-mono text-[10.5px] ${on === v ? "border-ink text-ink" : "border-line-strong text-grey-mid hover:border-ink hover:text-ink"}`}
+            >
+              {v ? "On" : "Off"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-[6px] font-mono text-[10.5px] leading-[1.5] text-grey-soft text-pretty">
+        Your phone can ask what you read; this laptop answers from its own Memory. The question and answer pass through your account for a moment, then are deleted. Memory itself never leaves this laptop.
+      </div>
     </div>
   );
 }

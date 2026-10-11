@@ -2,18 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAssistant } from "../hooks/useAssistant";
 import { useTheme } from "../hooks/useTheme";
+import { useVisualViewport } from "../hooks/useVisualViewport";
 import ThemeToggle from "./ThemeToggle";
 import { useSchedule } from "../hooks/useSchedule";
-import { ensureAudioUnlocked } from "../lib/speech";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { hasLocalAgent } from "../lib/agentClient";
 import { startAgentRelayClient } from "../lib/agentRelay";
-import { useAgentView } from "../hooks/useAgentView";
-import AgentCard from "./AgentCard";
 import ConnectionCheck from "./ConnectionCheck";
 import { connectionProbes } from "../lib/connectionCheck";
 import { defaultPhoneName } from "../lib/pairing";
 import { todayISO } from "../lib/schedule";
+import { initialTab, loadStoredTab, saveTab, type PhoneTab } from "../lib/phoneTabs";
+import { loadPhoneMemoryAllowed, phoneMemoryAllowed, setPhoneMemoryAllowed } from "../lib/phoneMemorySetting";
 import { addDays, longLabel, mondayOf, parseISODate, weekDates, WEEKDAY_SHORT } from "../../shared/datetime";
 import {
   LAPTOP_ASLEEP_MESSAGE,
@@ -23,21 +23,36 @@ import {
   updateLaptopName,
   useLaptopPresence,
 } from "../lib/devices";
+import PhoneTabBar from "./phone/PhoneTabBar";
+import PhoneChat from "./phone/PhoneChat";
+import CalendarDock from "./phone/CalendarDock";
+import LaptopChip, { SettingsButton } from "./phone/LaptopChip";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 /**
- * Phone home (/remote when paired). Read-only today/week of the same
- * calendar via useSchedule (live through the existing realtime fan-out),
- * fixed blocks locked (no editing here by design), laptop presence chip,
- * settings sheet and hold-to-talk running the same planner on the phone.
+ * Phone home (/remote when paired): a bottom tab bar with two pages.
+ *   Chat     — talking/typing with Rocky (calendar, commitments, bookings,
+ *              Memory questions answered on the laptop).
+ *   Calendar — today/week of the same calendar (live through the realtime
+ *              fan-out), with a floating mic, a reply toast and any pending
+ *              confirmation or booking run kept in view.
+ * One assistant serves both tabs. Its history stays on this phone (local
+ * Dexie), and private turns (Memory) are never saved.
  */
 export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   const today = todayISO();
   const [selected, setSelected] = useState(today);
   const [view, setView] = useState<"day" | "week">("day");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tab, setTabState] = useState<PhoneTab>(() => initialTab(typeof window !== "undefined" ? window.location.search : "", loadStoredTab()));
+  const setTab = (t: PhoneTab) => {
+    setTabState(t);
+    saveTab(t);
+  };
+  const viewport = useVisualViewport();
   const { day, week, now, loading, error, refresh } = useSchedule(selected);
+  void now;
 
   // One-week row, swipeable across weeks: 26 weeks back and forward, each a
   // snap page. Same cells as before — swipe right for next week, left for
@@ -52,13 +67,13 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   const selectedWeekIdx = stripWeeks.findIndex((w) => w.includes(selected));
 
   // Start on this week; follow the selection when a tapped day sits in an
-  // adjacent week.
+  // adjacent week. (The strip remounts when the Calendar tab comes back.)
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
-    el.scrollLeft = STRIP_WEEKS_BACK * el.clientWidth;
+    el.scrollLeft = (selectedWeekIdx >= 0 ? selectedWeekIdx : STRIP_WEEKS_BACK) * el.clientWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tab]);
   useEffect(() => {
     const el = stripRef.current;
     if (!el || selectedWeekIdx < 0) return;
@@ -72,7 +87,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
     const id = window.setInterval(() => void touchPhoneSeen(), 60_000);
     return () => window.clearInterval(id);
   }, []);
-  const assistant = useAssistant(() => void refresh());
+  const assistant = useAssistant(() => void refresh(), { persist: true, keepPrivate: false });
   // Phone: the booking agent runs on the laptop; this relays to it.
   useEffect(() => {
     if (!isSupabaseConfigured || hasLocalAgent()) return;
@@ -82,176 +97,194 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   const dayList = selected === today ? day.events : (week.days.find((d) => d.date === selected)?.events ?? []);
   const next = selected === today ? dayList.find((e) => e.status === "now") ?? dayList.find((e) => e.status === "upcoming") ?? null : null;
 
-  const chip =
-    presence.status === "online"
-      ? { dot: "var(--color-accent)", label: "Laptop online" }
-      : presence.status === "offline"
-        ? { dot: "var(--color-warm)", label: "Laptop asleep" }
-        : { dot: "var(--color-grey-faint)", label: "Connecting…" };
+  // The shell is the visible viewport: with the keyboard up the composer
+  // stays above it and the tab bar steps aside.
+  const shellStyle = viewport.height ? { height: viewport.height, top: viewport.top } : undefined;
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col bg-canvas text-ink">
-      <header className="flex flex-none items-center gap-2 px-5 pt-4">
-        <div className="min-w-0 flex-1">
-          <div className="font-mono text-[10.5px] tracking-label uppercase text-grey-mid">
-            {selected === today ? "Today" : selected}
-          </div>
-          <div className="truncate text-[22px] font-medium tracking-[-0.02em]">{day.headline || "Your day"}</div>
-        </div>
-        <span className="inline-flex flex-none items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-1.5 font-mono text-micro tracking-tab uppercase text-grey" title={`${presence.laptopName} · ${chip.label}`}>
-          <span className="h-2 w-2 rounded-full" style={{ background: chip.dot }} aria-hidden />
-          {chip.label}
-        </span>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="Settings"
-          className="flex h-10 w-10 flex-none cursor-pointer items-center justify-center rounded-[3px] border border-line-strong font-mono text-13 text-grey-mid hover:border-ink hover:text-ink"
-        >
-          •••
-        </button>
-      </header>
+    <div className="fixed inset-x-0 top-0 mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-canvas text-ink" style={shellStyle}>
+      <AnimatePresence mode="wait" initial={false}>
+        {tab === "calendar" ? (
+          <motion.div
+            key="calendar"
+            id="phone-panel-calendar"
+            role="tabpanel"
+            aria-labelledby="phone-tab-calendar"
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 12 }}
+            transition={{ duration: 0.22, ease: EASE }}
+            className="relative flex min-h-0 flex-1 flex-col"
+          >
+          <header className="flex flex-none items-center gap-2 px-5 pt-4">
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[10.5px] tracking-label uppercase text-grey-mid">
+                {selected === today ? "Today" : selected}
+              </div>
+              <div className="truncate text-[22px] font-medium tracking-[-0.02em]">{day.headline || "Your day"}</div>
+            </div>
+            <LaptopChip presence={presence} />
+            <SettingsButton onClick={() => setSettingsOpen(true)} />
+          </header>
 
-      <div className="flex-none px-5 pt-3">
-        <div className="grid grid-cols-2 gap-1 rounded-[3px] border border-line bg-card p-1" role="group" aria-label="Calendar view">
-          {(["day", "week"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              aria-pressed={view === v}
-              className={`relative h-9 cursor-pointer rounded-[3px] font-mono text-micro tracking-tab uppercase ${
-                view === v ? "text-canvas" : "text-grey-mid hover:text-ink"
-              }`}
+          <div className="flex-none px-5 pt-3">
+            <div className="grid grid-cols-2 gap-1 rounded-[3px] border border-line bg-card p-1" role="group" aria-label="Calendar view">
+              {(["day", "week"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
+                  aria-pressed={view === v}
+                  className={`relative h-9 cursor-pointer rounded-[3px] font-mono text-micro tracking-tab uppercase ${
+                    view === v ? "text-canvas" : "text-grey-mid hover:text-ink"
+                  }`}
+                >
+                  {view === v && (
+                    <motion.span
+                      layoutId="phone-view-tab"
+                      className="absolute inset-0 rounded-[3px] bg-ink"
+                      transition={{ duration: 0.22, ease: EASE }}
+                    />
+                  )}
+                  <span className="relative">{v}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex-none px-5 pt-3">
+            <div
+              ref={stripRef}
+              className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              role="group"
+              aria-label="Weeks — swipe left or right for more weeks"
             >
-              {view === v && (
-                <motion.span
-                  layoutId="phone-view-tab"
-                  className="absolute inset-0 rounded-[3px] bg-ink"
-                  transition={{ duration: 0.22, ease: EASE }}
-                />
-              )}
-              <span className="relative">{v}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-none px-5 pt-3">
-        <div
-          ref={stripRef}
-          className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="group"
-          aria-label="Weeks — swipe left or right for more weeks"
-        >
-          {stripWeeks.map((days) => (
-            <div key={days[0]} className="grid w-full flex-none snap-start grid-cols-7 gap-1">
-              {days.map((date) => {
-                const d = parseISODate(date);
-                const isSel = date === selected;
-                const isToday = date === today;
-                return (
-                  <button
-                    key={date}
-                    type="button"
-                    onClick={() => setSelected(date)}
-                    aria-label={`${longLabel(date)}${isToday ? ", today" : ""}`}
-                    aria-pressed={isSel}
-                    className={`relative flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
-                      isSel ? "border-ink text-canvas" : "border-line bg-card text-ink hover:border-line-strong"
-                    }`}
-                  >
-                    {isSel && (
-                      <motion.span
-                        layoutId="phone-day"
-                        className="absolute inset-0 rounded-[3px] bg-ink"
-                        transition={{ duration: 0.22, ease: EASE }}
-                      />
-                    )}
-                    <span className="relative font-mono text-micro uppercase">{WEEKDAY_SHORT[d.getDay()]}</span>
-                    <span className="relative text-15 font-medium">{d.getDate()}</span>
-                    {!isSel && isToday && <span className="relative h-1 w-1 rounded-full bg-accent" aria-hidden />}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto px-5 pb-48 pt-4 [-webkit-overflow-scrolling:touch]">
-        <div className="mb-3 flex flex-col gap-2">
-          {presence.status === "offline" && (
-            <div role="status" className="rounded-[3px] border border-line bg-card px-3 py-2 text-13 text-warm">
-              {LAPTOP_ASLEEP_MESSAGE}
-            </div>
-          )}
-          {/* Runs once when the home opens; opens itself only on a problem. */}
-          <ConnectionCheck probes={probes} runKey={1} />
-        </div>
-        {loading ? (
-          <div className="font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
-        ) : error ? (
-          <div>
-            <div className="font-mono text-label tracking-gap uppercase text-warm">Can't reach your calendar.</div>
-            <button type="button" onClick={() => void refresh()} className="mt-2 cursor-pointer rounded-[3px] bg-ink px-4 py-2 text-13 font-medium text-canvas">
-              Retry
-            </button>
-          </div>
-        ) : view === "day" ? (
-          <div className="flex flex-col gap-3">
-            {next && (
-              <div className="rounded-[3px] border border-accent-line bg-accent-bg px-[15px] py-3">
-                <div className="font-mono text-micro tracking-tab uppercase text-accent-deep">Next up</div>
-                <div className="mt-1 text-15 font-medium">{next.title}</div>
-                <div className="font-mono text-meta text-grey">
-                  {next.startTime} – {next.endTime}
+              {stripWeeks.map((days) => (
+                <div key={days[0]} className="grid w-full flex-none snap-start grid-cols-7 gap-1">
+                  {days.map((date) => {
+                    const d = parseISODate(date);
+                    const isSel = date === selected;
+                    const isToday = date === today;
+                    return (
+                      <button
+                        key={date}
+                        type="button"
+                        onClick={() => setSelected(date)}
+                        aria-label={`${longLabel(date)}${isToday ? ", today" : ""}`}
+                        aria-pressed={isSel}
+                        className={`relative flex h-[56px] cursor-pointer flex-col items-center justify-center gap-[2px] rounded-[3px] border ${
+                          isSel ? "border-ink text-canvas" : "border-line bg-card text-ink hover:border-line-strong"
+                        }`}
+                      >
+                        {isSel && (
+                          <motion.span
+                            layoutId="phone-day"
+                            className="absolute inset-0 rounded-[3px] bg-ink"
+                            transition={{ duration: 0.22, ease: EASE }}
+                          />
+                        )}
+                        <span className="relative font-mono text-micro uppercase">{WEEKDAY_SHORT[d.getDay()]}</span>
+                        <span className="relative text-15 font-medium">{d.getDate()}</span>
+                        {!isSel && isToday && <span className="relative h-1 w-1 rounded-full bg-accent" aria-hidden />}
+                      </button>
+                    );
+                  })}
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto px-5 pb-28 pt-4 [-webkit-overflow-scrolling:touch]">
+            <div className="mb-3 flex flex-col gap-2">
+              {presence.status === "offline" && (
+                <div role="status" className="rounded-[3px] border border-line bg-card px-3 py-2 text-13 text-warm">
+                  {LAPTOP_ASLEEP_MESSAGE}
+                </div>
+              )}
+              {/* Runs once when the home opens; opens itself only on a problem. */}
+              <ConnectionCheck probes={probes} runKey={1} />
+            </div>
+            {loading ? (
+              <div className="font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
+            ) : error ? (
+              <div>
+                <div className="font-mono text-label tracking-gap uppercase text-warm">Can't reach your calendar.</div>
+                <button type="button" onClick={() => void refresh()} className="mt-2 cursor-pointer rounded-[3px] bg-ink px-4 py-2 text-13 font-medium text-canvas">
+                  Retry
+                </button>
               </div>
-            )}
-            {dayList.length === 0 ? (
-              <div className="rounded-[3px] border border-dashed border-line-strong bg-panel px-6 py-8 text-center font-mono text-label tracking-tab uppercase text-grey-ghost">
-                Nothing on the books
-              </div>
-            ) : (
-              dayList.map((e) => (
-                <div key={e.id} className="rounded-[3px] border border-line-block bg-card px-[15px] py-3">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <div className="min-w-0 flex-1 truncate text-15 font-medium text-ink-soft">{e.title}</div>
-                    <div className="flex-none font-mono text-meta text-grey-faint">
-                      {e.startTime} – {e.endTime}
+            ) : view === "day" ? (
+              <div className="flex flex-col gap-3">
+                {next && (
+                  <div className="rounded-[3px] border border-accent-line bg-accent-bg px-[15px] py-3">
+                    <div className="font-mono text-micro tracking-tab uppercase text-accent-deep">Next up</div>
+                    <div className="mt-1 text-15 font-medium">{next.title}</div>
+                    <div className="font-mono text-meta text-grey">
+                      {next.startTime} – {next.endTime}
                     </div>
                   </div>
-                  {(e.subtext || e.note) && <div className="mt-1 truncate font-mono text-meta text-grey">{e.note ?? e.subtext}</div>}
-                  {e.status === "now" && <div className="mt-1 font-mono text-micro tracking-tab uppercase text-accent">Now</div>}
-                </div>
-              ))
+                )}
+                {dayList.length === 0 ? (
+                  <div className="rounded-[3px] border border-dashed border-line-strong bg-panel px-6 py-8 text-center font-mono text-label tracking-tab uppercase text-grey-ghost">
+                    Nothing on the books
+                  </div>
+                ) : (
+                  dayList.map((e) => (
+                    <div key={e.id} className="rounded-[3px] border border-line-block bg-card px-[15px] py-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <div className="min-w-0 flex-1 truncate text-15 font-medium text-ink-soft">{e.title}</div>
+                        <div className="flex-none font-mono text-meta text-grey-faint">
+                          {e.startTime} – {e.endTime}
+                        </div>
+                      </div>
+                      {(e.subtext || e.note) && <div className="mt-1 truncate font-mono text-meta text-grey">{e.note ?? e.subtext}</div>}
+                      {e.status === "now" && <div className="mt-1 font-mono text-micro tracking-tab uppercase text-accent">Now</div>}
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {week.days.map((d) => (
+                  <button key={d.date} type="button" onClick={() => { setSelected(d.date); setView("day"); }} className="cursor-pointer rounded-[3px] border border-line bg-card p-3.5 text-left">
+                    <span className="flex items-center gap-2">
+                      <span className="text-14 font-medium">{d.longLabel}</span>
+                      <span className="flex-1" />
+                      <span className="font-mono text-micro tracking-tab uppercase text-grey-faint">
+                        {d.events.length === 0 ? "Free" : `${d.events.length} event${d.events.length === 1 ? "" : "s"}`}
+                      </span>
+                    </span>
+                    {d.events.slice(0, 4).map((e) => (
+                      <span key={e.id} className="mt-1.5 flex items-center gap-2 text-14">
+                        <span className="tnum font-mono text-meta text-grey">{e.startTime}</span>
+                        <span className="min-w-0 flex-1 truncate text-ink-soft">{e.title}</span>
+                      </span>
+                    ))}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
+            <CalendarDock assistant={assistant} onOpenChat={() => setTab("chat")} />
+          </motion.div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {week.days.map((d) => (
-              <button key={d.date} type="button" onClick={() => { setSelected(d.date); setView("day"); }} className="cursor-pointer rounded-[3px] border border-line bg-card p-3.5 text-left">
-                <span className="flex items-center gap-2">
-                  <span className="text-14 font-medium">{d.longLabel}</span>
-                  <span className="flex-1" />
-                  <span className="font-mono text-micro tracking-tab uppercase text-grey-faint">
-                    {d.events.length === 0 ? "Free" : `${d.events.length} event${d.events.length === 1 ? "" : "s"}`}
-                  </span>
-                </span>
-                {d.events.slice(0, 4).map((e) => (
-                  <span key={e.id} className="mt-1.5 flex items-center gap-2 text-14">
-                    <span className="tnum font-mono text-meta text-grey">{e.startTime}</span>
-                    <span className="min-w-0 flex-1 truncate text-ink-soft">{e.title}</span>
-                  </span>
-                ))}
-              </button>
-            ))}
-          </div>
+          <motion.div
+            key="chat"
+            id="phone-panel-chat"
+            role="tabpanel"
+            aria-labelledby="phone-tab-chat"
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -12 }}
+            transition={{ duration: 0.22, ease: EASE }}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <PhoneChat assistant={assistant} presence={presence} onOpenSettings={() => setSettingsOpen(true)} keyboardOpen={viewport.keyboardOpen} />
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      <TalkDock assistant={assistant} offline={presence.status === "offline"} now={now} />
+      {!viewport.keyboardOpen && <PhoneTabBar tab={tab} onChange={setTab} />}
 
       <AnimatePresence>
         {settingsOpen && (
@@ -269,186 +302,6 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
 /** Weeks rendered each side of this week in the swipeable strip. */
 const STRIP_WEEKS_BACK = 26;
 const STRIP_WEEKS_FWD = 26;
-
-function TalkDock({
-  assistant,
-  offline,
-  now: _now,
-}: {
-  assistant: ReturnType<typeof useAssistant>;
-  offline: boolean;
-  now: string;
-}) {
-  void _now;
-  const [draft, setDraft] = useState("");
-
-  // Tap to talk, tap to finish. Nothing ends the turn early — sliding a
-  // thumb off the button must never cancel what was said.
-  const tap = () => {
-    void ensureAudioUnlocked();
-    assistant.toggle();
-  };
-
-  const lastAssistant = [...assistant.turns].reverse().find((t) => t.role === "assistant") ?? null;
-  const lastReply = lastAssistant?.text ?? null;
-  const [replyGone, setReplyGone] = useState(false);
-
-  // Same confirm gate as the laptop panel: the planner asks
-  // "say yes or tap Confirm" before destructive tools run.
-  const agent = useAgentView();
-  const agentBusy = !["idle", "done", "failed", "cancelled"].includes(agent.phase);
-  const needsConfirm = Boolean(
-    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && assistant.state === "idle" && !agentBusy,
-  );
-  const confirm = () => {
-    if (!needsConfirm) return;
-    void assistant.send("yes");
-  };
-  const cancel = () => {
-    if (!needsConfirm) return;
-    void assistant.send("cancel");
-  };
-
-  // A new reply always shows; once the turn is over it clears after 2 s so
-  // only the calendar remains. Errors never auto-hide.
-  useEffect(() => {
-    setReplyGone(false);
-  }, [lastAssistant?.id]);
-  useEffect(() => {
-    if (!lastReply || replyGone || assistant.state !== "idle") return;
-    const t = window.setTimeout(() => setReplyGone(true), 2000);
-    return () => window.clearTimeout(t);
-  }, [lastReply, lastAssistant?.id, replyGone, assistant.state]);
-
-  return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center border-t border-line bg-canvas">
-      <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3">
-        {assistant.error && (
-          <div className="w-full rounded-[3px] border border-line bg-card px-3 py-2 font-mono text-meta leading-[1.5] text-grey">{assistant.error}</div>
-        )}
-        {agent.phase !== "idle" && (
-          <div className="w-full">
-            <AgentCard agent={agent} onSend={(t) => void assistant.send(t)} compact />
-          </div>
-        )}
-        <AnimatePresence initial={false}>
-          {lastReply && !replyGone && assistant.state !== "thinking" && (
-            <motion.div
-              key={lastAssistant?.id ?? "reply"}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={{ duration: 0.22, ease: EASE }}
-              className="max-h-[120px] w-full overflow-y-auto rounded-[3px] border border-line bg-card px-3 py-2 text-14 leading-[1.5] text-ink-soft"
-            >
-              {lastReply}
-            </motion.div>
-          )}
-        </AnimatePresence>
-        {assistant.state === "thinking" && <div className="font-mono text-micro tracking-tab uppercase text-accent">Thinking…</div>}
-        {assistant.state === "listening" && (
-          <div className="flex items-end gap-[3px]" aria-label="Listening">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span
-                key={i}
-                className="w-[3px] rounded-[2px] bg-accent transition-[height] duration-100"
-                style={{ height: 6 + Math.round(assistant.level * 22 * (i === 2 ? 1 : i % 2 ? 0.75 : 0.5)) }}
-              />
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-5">
-          <AnimatePresence initial={false}>
-            {needsConfirm && (
-              <motion.button
-                key="cancel"
-                type="button"
-                onClick={cancel}
-                aria-label="Cancel — don't do it"
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={{ duration: 0.2, ease: EASE }}
-                whileTap={{ scale: 0.9 }}
-                className="grid h-12 w-12 cursor-pointer select-none place-items-center rounded-full border border-line-strong text-[18px] text-warm hover:border-ink"
-              >
-                <span aria-hidden>✕</span>
-              </motion.button>
-            )}
-          </AnimatePresence>
-          <motion.button
-            type="button"
-            onClick={tap}
-            aria-label={assistant.state === "listening" ? "Tap to finish and send" : "Tap to talk to Rocky"}
-            whileTap={{ scale: 0.92 }}
-            transition={{ duration: 0.15, ease: EASE }}
-            className={`grid h-[72px] w-[72px] cursor-pointer select-none place-items-center rounded-full text-canvas transition-colors ${
-              assistant.state === "listening" ? "bg-accent" : "bg-ink hover:bg-accent"
-            }`}
-          >
-            <span className="flex items-center gap-[3px]" aria-hidden>
-              {[16, 22, 14, 20].map((h, i) => (
-                <span key={i} className="w-[3px] rounded-[2px] bg-canvas" style={{ height: h }} />
-              ))}
-            </span>
-          </motion.button>
-          <AnimatePresence initial={false}>
-            {needsConfirm && (
-              <motion.button
-                key="confirm"
-                type="button"
-                onClick={confirm}
-                aria-label="Confirm — yes, do it"
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={{ duration: 0.2, ease: EASE }}
-                whileTap={{ scale: 0.9 }}
-                className="grid h-12 w-12 cursor-pointer select-none place-items-center rounded-full bg-ink text-[18px] text-canvas hover:bg-accent"
-              >
-                <span aria-hidden>✓</span>
-              </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
-        <div className="font-mono text-micro tracking-tab uppercase text-grey">
-          {needsConfirm
-            ? "Tap ✓ to confirm · ✕ to cancel"
-            : assistant.state === "listening"
-              ? "Tap to finish"
-              : offline
-                ? "Tap to talk · laptop asleep"
-                : "Tap to talk"}
-        </div>
-        <div className="flex w-full items-center gap-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && draft.trim()) {
-                void assistant.send(draft.trim());
-                setDraft("");
-              }
-            }}
-            placeholder="Or type here"
-            className="min-w-0 flex-1 rounded-[3px] border border-line-strong bg-card px-3 py-2 text-14 text-ink outline-none placeholder:text-grey-faint focus:border-ink"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (!draft.trim()) return;
-              void assistant.send(draft.trim());
-              setDraft("");
-            }}
-            className="flex-none cursor-pointer rounded-[3px] bg-ink px-4 py-2 font-mono text-13 font-medium text-canvas"
-          >
-            Send
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function SettingsSheet({
   laptopName,
@@ -560,6 +413,8 @@ function SettingsSheet({
 
         <div className="font-mono text-[10.5px] text-grey-soft">Talk uses your account’s keys — the same ones as your laptop.</div>
 
+        <PhoneMemoryToggle />
+
         {error && (
           <div role="alert" className="font-mono text-[11px] text-warm">
             {error}
@@ -584,6 +439,38 @@ function SettingsSheet({
         </button>
         <p className="text-center font-mono text-micro text-grey-faint">Signing out keeps the pairing.</p>
       </motion.div>
+    </div>
+  );
+}
+
+/** "Allow Memory questions from my phone" (same switch as the laptop's Profile → Devices). */
+function PhoneMemoryToggle() {
+  const [on, setOn] = useState(() => phoneMemoryAllowed());
+  useEffect(() => {
+    void loadPhoneMemoryAllowed().then(setOn);
+  }, []);
+  return (
+    <div className="flex flex-col gap-[9px]">
+      <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">Allow Memory questions from my phone</span>
+      <div className="flex gap-2" role="group" aria-label="Allow Memory questions from my phone">
+        {[true, false].map((v) => (
+          <button
+            key={String(v)}
+            type="button"
+            aria-pressed={on === v}
+            onClick={() => {
+              setOn(v);
+              void setPhoneMemoryAllowed(v).catch(() => {});
+            }}
+            className={`h-11 flex-1 cursor-pointer rounded-[3px] border font-mono text-micro tracking-tab uppercase ${on === v ? "border-ink text-ink" : "border-line-strong text-grey-mid hover:border-ink hover:text-ink"}`}
+          >
+            {v ? "On" : "Off"}
+          </button>
+        ))}
+      </div>
+      <span className="font-mono text-[10.5px] leading-[1.5] text-grey-soft">
+        Questions like “what did I read today about…” are answered by Rocky on your laptop. Each one goes through your account for a moment, then is deleted.
+      </span>
     </div>
   );
 }
