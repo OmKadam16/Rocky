@@ -16,9 +16,9 @@ export type TaskType = "restaurant" | "appointment" | "tickets";
 export const TASK_TYPES: TaskType[] = ["restaurant", "appointment", "tickets"];
 
 /** Browser worker model. The planner never uses these, and never reads browser_key. */
-export const BROWSER_MODELS = ["gpt-5.4", "gpt-5.4-mini"] as const;
+export const BROWSER_MODELS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
 export type BrowserModel = (typeof BROWSER_MODELS)[number];
-export const DEFAULT_BROWSER_MODEL: BrowserModel = "gpt-5.4";
+export const DEFAULT_BROWSER_MODEL: BrowserModel = "gpt-5.5";
 const BROWSER_MODEL_KEY = "vc-browser-model";
 
 export function browserModel(): BrowserModel {

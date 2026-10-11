@@ -29,9 +29,9 @@
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
-/** Default worker. gpt-5.4-mini is the cheaper option (about 3x less per token). */
-const DEFAULT_MODEL = "gpt-5.4";
-const ALLOWED_MODELS = new Set(["gpt-5.4", "gpt-5.4-mini"]);
+/** Default worker (Om's call). gpt-5.4-mini is the cheaper option (about 3x less per token). */
+const DEFAULT_MODEL = "gpt-5.5";
+const ALLOWED_MODELS = new Set(["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
 
 /**
  * The agent page is a fixed 1280x800 CSS-pixel viewport, and screenshots are

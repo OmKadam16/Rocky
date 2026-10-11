@@ -115,7 +115,7 @@ describe("scripted Responses loop: ask, resume, confirm, book", () => {
     expect(h.ofType("question")[0]).toMatchObject({ question: "Any dietary needs I should add?", field: "dietary needs" });
 
     // First request carries the task + screenshot, and no page text ever.
-    expect(h.bodies[0].model).toBe("gpt-5.4");
+    expect(h.bodies[0].model).toBe("gpt-5.5");
     expect(h.bodies[0].tools[0]).toEqual({ type: "computer" });
     expect(h.bodies[0].input[0].content[1]).toMatchObject({ type: "input_image", detail: "original" });
     expect(h.bodies[1].previous_response_id).toBe("resp_" + (seq - 5));
@@ -501,9 +501,10 @@ describe("task + tools", () => {
   it("whitelists the task and pins model + http(s)", () => {
     const t = normalizeTask({ ...TASK, startUrl: "javascript:alert(1)", model: "gpt-4o", evil: 1, details: { partySize: 2, x: "y" } });
     expect(t.startUrl).toBe("");
-    expect(t.model).toBe("gpt-5.4");
+    expect(t.model).toBe("gpt-5.5");
     expect(t).not.toHaveProperty("evil");
     expect(t.details).toEqual({ partySize: "2" });
+    expect(normalizeTask({ ...TASK, model: "gpt-5.5" }).model).toBe("gpt-5.5");
     expect(normalizeTask({ ...TASK, model: "gpt-5.4-mini" }).model).toBe("gpt-5.4-mini");
     expect(normalizeTask({ type: "bogus" }).type).toBe("restaurant");
   });

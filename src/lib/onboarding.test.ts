@@ -144,8 +144,8 @@ describe("provider baseURL mapping", () => {
   it("normalizes providers and resolves per-provider defaults", () => {
     expect(normalizeProvider("openai")).toBe("OpenAI");
     expect(normalizeProvider("bogus")).toBe("OpenAI");
-    expect(defaultModelFor("OpenAI")).toBe("gpt-4o");
-    expect(resolveModelId("", "OpenAI")).toBe("gpt-4o");
+    expect(defaultModelFor("OpenAI")).toBe("gpt-5.5");
+    expect(resolveModelId("", "OpenAI")).toBe("gpt-5.5");
     expect(resolveModelId("gpt-4o", "OpenAI")).toBe("gpt-4o");
     expect(resolveModelId("bogus-model", "Gemini")).toBe(defaultModelFor("Gemini"));
   });

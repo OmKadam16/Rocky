@@ -21,15 +21,15 @@ export type Provider = { id: string; label: string; soon: boolean };
 export type Model = { id: string; label: string; tested: boolean };
 
 /**
- * gpt-4o stays the default, not a mini. The planner lives or dies on tool
- * calling, and the 4o mini skips tools and narrates the action instead often
- * enough to matter — which leaves the user with a calendar that disagrees
- * with what it just told them. The GPT-5 minis are far better tool-callers on
- * paper, but none is verified against our 12 tools yet, so they stay
- * opt-in (untested) until the verification pass. Same rule as Gemini.
+ * gpt-5.5 is the default (Om's call): strongest agentic tool-calling in the
+ * OpenAI list, and speedParams() already pins every gpt-5* model to low
+ * reasoning effort + low verbosity. Honest caveat: 5.5 is still marked
+ * untested against our tool set — if it narrates instead of calling tools,
+ * switch back to gpt-4o (verified) and report it. The GPT-4o entries stay in
+ * the list as the known-good fallback.
  */
 export const DEFAULT_PROVIDER = "OpenAI";
-export const DEFAULT_MODEL = "gpt-4o";
+export const DEFAULT_MODEL = "gpt-5.5";
 
 export const PROVIDERS: Provider[] = [
   { id: "OpenAI", label: "OpenAI", soon: false },
@@ -47,6 +47,7 @@ export const PROVIDER_BASE_URL: Record<string, string> = {
 
 export const PROVIDER_MODELS: Record<string, Model[]> = {
   OpenAI: [
+    { id: "gpt-5.5", label: "GPT-5.5 (untested)", tested: false },
     { id: "gpt-4o", label: "GPT-4o", tested: true },
     { id: "gpt-4o-mini", label: "GPT-4o mini", tested: true },
     { id: "gpt-4.1", label: "GPT-4.1", tested: true },

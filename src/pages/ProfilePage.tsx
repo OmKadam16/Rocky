@@ -292,7 +292,7 @@ export default function ProfilePage() {
                   </label>
                   <label className="flex flex-col gap-[10px]">
                     <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Browser key</span>
-                    <span className="font-mono text-[10.5px] text-grey-soft">Separate OpenAI key for browser work (GPT-5.4 computer use). Planner turns never touch it.</span>
+                    <span className="font-mono text-[10.5px] text-grey-soft">Separate OpenAI key for browser work (GPT-5.5 computer use). Planner turns never touch it.</span>
                     <div className="flex items-center gap-3 border-b border-line-strong pb-[9px]">
                       <input type={browserKeyShown ? "text" : "password"} value={browserKey} onChange={(e) => { setBrowserKey(e.target.value); setBrowserTest(null); }} placeholder="Paste your browser key" className="min-w-0 flex-1 border-0 bg-transparent font-mono text-[14px] text-ink outline-none" />
                       <button onClick={() => setBrowserKeyShown((v) => !v)} className="flex-none cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">{browserKeyShown ? "Hide" : "Show"}</button>
@@ -307,7 +307,7 @@ export default function ProfilePage() {
                           onClick={() => { setBrowserModel(m); setAgentModel(m); setBrowserTest(null); }}
                           className={`cursor-pointer rounded-[3px] border px-[10px] py-[5px] font-mono text-[10.5px] ${agentModel === m ? "border-ink text-ink" : "border-line-strong text-grey-mid hover:border-ink hover:text-ink"}`}
                         >
-                          {m}{m === "gpt-5.4-mini" ? " · cheaper" : ""}
+                          {m}{m === "gpt-5.5" ? " · strongest" : m === "gpt-5.4-mini" ? " · cheaper" : ""}
                         </button>
                       ))}
                     </div>

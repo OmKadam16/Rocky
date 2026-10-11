@@ -234,7 +234,7 @@ function registerSecretHandlers() {
 }
 
 // ---------------------------------------------------------------------------
-// Booking Agent v2 (agentWindow.cjs + agentCore.cjs): the GPT-5.4 computer-use
+// Booking Agent v2 (agentWindow.cjs + agentCore.cjs): the GPT-5.5 computer-use
 // loop runs here in main, next to the keychain. The renderer only gets a small
 // start/answer/confirm/continue/cancel API plus events.
 // ---------------------------------------------------------------------------
