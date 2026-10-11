@@ -21,3 +21,4 @@ Voice Calendar*.html
 landing/
 # Built Chrome extension (npm run build:extension)
 extension/dist
+release-*
