@@ -259,6 +259,47 @@ code does the search.
       MemoryResultCard with sources; the planner only ever gets "Answered from Memory, shown
       to the user". Clear one-line messages when Memory is off / Ollama down / nothing found.
 
+### Phase 11: Unified Memory: gists, vectors, monthly compaction
+Goal: Memory stores the gist of what the user read (not raw pages), searchable by meaning, and
+old months shrink automatically. All local: memory text, gists and vectors never go to Supabase,
+OpenAI, any cloud, logs, the relay or the phone. No Supabase schema change.
+Decision (Om, 2026-10-11): the old retention setting (7/30/90 days/Forever) is replaced by
+monthly compaction + the size cap (default 500 MB); "Keep shrinking older months" is the only
+further shrink.
+- [x] Inbox → gist pipeline: `pages` is a temporary inbox (raw text ≤ 24 h, deleted as soon as
+      gisted); background worker in main (`electron/memoryWorker.cjs`): one item at a time, waits
+      while the user is mid-turn or a booking run is going (`memory:busy`), per-minute cap, 30 s
+      timeout, 3 tries then a title-only memory, queue cap 300 (oldest dropped and counted).
+- [x] Gists (`electron/memoryGist.cjs`): local model with Ollama `format` JSON schema (title, gist,
+      key_points ≤5, topics ≤5, entities ≤8, kind, importance 0-3, paper authors/venue/year),
+      validated + clamped in code; DOI / arXiv ids by regex; page text fenced as data; secrets
+      (API keys, cards, SSN, IBAN, JWTs, private keys) redacted first; search pages stored as
+      "searched: <query>" without a model; login / empty / feed pages skipped.
+- [x] Sessions + dedupe: same URL or content hash or near-identical gist → the same memory
+      (visit_count, last_seen); same topic within 30 minutes → one merged entry (all URLs,
+      first/last seen, minutes). "Save this page" is pinned (optional small thumbnail).
+- [x] Local vectors (`electron/memoryVectors.cjs`): Ollama /api/embed with `nomic-embed-text`
+      (EMBED_MODEL), batches of 16, Float32 blobs in `vectors`, in-memory cosine index; vectors
+      backfill when the model is installed later; keyword (BM25) fallback otherwise.
+- [x] Hybrid search (`electron/memorySearch.cjs`): cosine + BM25 over title/gist/topics/entities/
+      body, recency boost, date/site/kind filters, tier-aware, relevance threshold (unrelated →
+      nothing). `ask_memory` answers only from retrieved gists/digests and is honest about
+      resolution ("I only have a summary of that month now").
+- [x] Monthly compaction (`electron/memoryCompact.cjs`): an ended month is compacted once
+      (clusters → digest per theme + a month overview; pinned / importance-3 kept as highlights
+      with full gists); one transaction per run; 7-day undo backup; idempotent + resumable
+      (a failed cluster keeps its originals, month marked done only when all succeed); runs at
+      start and daily, never while busy; size cap (oldest uncompacted month, then oldest
+      unimportant digests); "Keep shrinking older months" (off) → yearly overview after 12 months.
+- [x] Memory page: tier counts, storage, queue, last/next compaction, Compact now, Undo, Keep
+      shrinking, search model download, browse by month with Pin / Delete / Delete this month.
+- [x] Extension: time on page (`/visit`, active tab only), "Save this page" marked manual.
+- [x] Tests: `electron/memoryUnified.test.mjs` (fake Ollama + fake clock) + ported
+      `memory.test.mjs`; fixture `electron/test/fixtures/memory-pages.json`
+      (`node scripts/memory-fixtures.mjs`); eval `node scripts/memory-eval.mjs [--real]`.
+- [ ] Om: download the search model (Memory page → Search model), rebuild/reload the extension,
+      browse for a while, and run the eval with `--real`.
+
 ---
 
 ## 6. Do not build
@@ -366,3 +407,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Booking go-ahead fixed from a second live chat (plan read back three times, agent never started): a go-ahead right after the read-back ("yes", "Yes, make the appointment", "just book it") now starts the agent in code with no planner round trip; changes ("yes but at 9") and later unrelated yeses still go to the planner; book_appointment and the yes-to-suggestion accept the same natural wording. Agent prompt: TASK details are never re-asked, how to reach and fill a booking widget, ask with the closest open times when the exact one is taken. Installer rebuilt and reinstalled.
 - 2026-10-10: Chat memory (`src/lib/chatMemory.ts`, local Dexie `RockyChatMemory`, this device only, never Supabase): facts the user asks Rocky to keep (planner tools remember_fact / forget_fact; same topic replaces, secrets refused) plus a running summary of conversation that has left the planner's 8-turn window, folded in the background and on Clear chat (which now clears messages, not memory). The planner reads chat_memory first every turn. Chat header: "Memory · N" lists it, with per-item ✕ and Forget everything. No migration. Installer rebuilt and reinstalled.
 - 2026-10-11: Chat memory now syncs between laptop and phone through profile `extra.chat_memory` (no migration): facts and the summary are shared, folding bookkeeping stays per device, every write reads fresh first so neither device drops the other's change, a change on one device refreshes the other's Memory list over realtime, and the laptop's earlier local-only memory is merged in once. Installer rebuilt and reinstalled.
+- 2026-10-11: Phase 11 Unified Memory: raw pages are a 24 h inbox; a background worker gists them with the local model (JSON schema, injection-safe, secrets redacted), merges reading sessions and dedupes, embeds locally (nomic-embed-text, BM25 fallback); hybrid search with a relevance threshold; monthly compaction into digests + overviews (pinned / important kept, 7-day undo, resumable, size cap); retention setting replaced by compaction (Om's call); Memory page shows tiers, storage, queue, compaction and browse-by-month; extension sends time on page. Fixture: a busy month (200 entries) compacts 11.4x. No Supabase change.
