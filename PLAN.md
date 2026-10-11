@@ -191,7 +191,26 @@ Planner stays on `llm_key` and never reads `browser_key`. No schema change, no m
 - [x] Local booking records (separate local Dexie DB `RockyBookingRecords`, never synced) +
       reference on the calendar block (title + notes); failed → "(booking failed - finish by hand)",
       cancelled → hold removed.
-- [ ] Om: one real low-stakes free booking with the window visible.
+- [x] Speed pass (measured first): per-step timing (screenshot / model / action / settle / nav,
+      shot size) + run summary in the debug readout (`vc-debug=1`) and the main-process log;
+      event-based settle (load done + no request in flight + 250ms DOM quiet, cap 2s / 4s while
+      a page loads) instead of fixed sleeps; JPEG q85 screenshots; low reasoning effort with one
+      medium step after a blocked/looping step; stable `prompt_cache_key`; the start page
+      pre-opens while the plan is read back (the run waits for the yes, then reuses that load);
+      answers to an agent question skip the planner; TTS fetches the next chunk while one plays.
+- [x] Spoken progress updates (`src/lib/progressTalker.ts`): code-built filler lines from agent
+      events + a timer (first ~3s, then ≤1 per ~8s, no repeats, silenced by real events, user
+      speech, pauses). Shown as the status line on laptop + phone (relayed as `progress`), spoken
+      only on the device the user talks to. Setting: Profile → Voice → "Spoken progress updates"
+      (on by default; profile `extra.progress_speech`, no migration).
+- [x] Booking-contact verification codes (narrow exception): `request_verification_code` tool;
+      code decides booking-contact vs sign-in (code field's form text, URL, model reason; unsure →
+      handoff), normalizes 4-8 spoken/typed digits, types them itself (masked; one per box when
+      split), 3 tries then handoff. Never logged, emitted, relayed, stored, or sent to a model or
+      the planner. Phone: codes are entered on the laptop only (the relay is Supabase).
+      Sign-in 2FA, authenticator/backup codes, passwords, cards, IDs, CAPTCHAs, payment: handoff.
+- [ ] Om: one real low-stakes free booking with the window visible (`vc-debug=1` to read timings).
+- [ ] Om: decide how a code said to the phone should reach the laptop (today: laptop only).
 
 Docs check (OpenAI computer-use guide + API reference, 2026-10-10): the GA tool is
 `{ type: "computer" }` with no display size or environment fields; a `computer_call` carries an
@@ -294,3 +313,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Windows desktop build: `npm run build:win` → `release/Rocky Setup <version>.exe` (NSIS, per-user, x64, unsigned; uses the local Electron dist because the zip extract-rename hits EPERM on this machine). Single-instance lock so a second launch can't run a second agent / relay host. Installed on Om's laptop for the live booking test.
 - 2026-10-10: Fix from the first live run (Nobu): OpenAI 400 "Computer tool only allows input image without previous response". After open_url / a continued handoff the loop no longer sends a plain screenshot message; it asks the model to take a screenshot, which comes back as computer_call_output. Regression tests added (135 unit, E2E 17/17). Installer rebuilt and reinstalled.
 - 2026-10-10: Retrying a booking reuses its earlier failed/unclear hold instead of reporting a clash with it (the in-memory draft doesn't survive an app restart). 136 unit tests. Installer rebuilt and reinstalled.
+- 2026-10-10: Booking Agent v2 speed, reassurance and OTP: per-step timing + run summary (debug readout); event-based settle, JPEG shots, pre-opened start page, planner-free answers, TTS prefetch (local overhead per acting step on the E2E fixture ~594ms → ~350-410ms; model time not measurable here, see report); spoken progress updates with the new Profile → Voice setting (no migration); booking-contact verification codes typed by code, never stored or relayed. 174 unit tests + 28-check E2E.
