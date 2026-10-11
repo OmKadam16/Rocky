@@ -37,6 +37,10 @@ function serve() {
         return;
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      if (req.url.startsWith("/recaptcha/")) return res.end("<!doctype html><body style='margin:0;background:#f9f9f9'>[captcha widget]</body>");
+      if (req.url === "/captcha") {
+        return res.end("<!doctype html><h1>One more step</h1><button id=go>Continue</button><iframe src='/recaptcha/api2/anchor?k=test&size=normal' width='304' height='78'></iframe>");
+      }
       res.end(fs.readFileSync(FIXTURE));
     });
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -176,6 +180,18 @@ async function main() {
   const w = png.readUInt32BE(16);
   const h = png.readUInt32BE(20);
   check(w === 1280 && h === 800, `screenshots are ${w}x${h}`);
+
+  // A visible CAPTCHA stops the run and hands over; the invisible one above didn't.
+  const capScript = [async ({ site }) => cc(click(await at(site, "#go")))];
+  const capController = createAgentController(
+    { getKey: () => null, parent: () => null, broadcast: onEvent },
+    { callModel: async (body, { site }) => capScript.shift()({ site, body }) },
+  );
+  await capController.start({ type: "restaurant", venue: "Testaurant", startUrl: url + "captcha" });
+  const take = await next("needs_user_takeover");
+  check(take.reason === "captcha" && /say continue/i.test(take.message), "visible CAPTCHA hands over to the user");
+  check(!events.some((e) => e.type === "needs_user_takeover" && e !== take), "invisible reCAPTCHA on the booking page did not trigger a takeover");
+  capController.cancel();
 
   server.close();
   const failed = checks.filter((c) => !c.ok);

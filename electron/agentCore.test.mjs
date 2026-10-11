@@ -244,6 +244,13 @@ describe("money, login, CAPTCHA, 2FA: hand over, never act", () => {
     expect(h.bodies[1].previous_response_id).toBeTruthy();
   });
 
+  it("a visible password box alone doesn't stop the run (guest checkout); typing into it does", async () => {
+    const h = harness({ probe: { hasPassword: true }, script: [cc(click(5, 5)), fc("give_up", { reason: "x" })] });
+    await h.run.start();
+    expect(h.ofType("needs_user_takeover")).toHaveLength(0);
+    expect(h.mouseDowns()).toHaveLength(1);
+  });
+
   it("tickets: the confirmation step becomes a payment handoff, never a click", async () => {
     const h = harness({
       task: { ...TASK, type: "tickets", details: { event: "Concert", quantity: "2" } },

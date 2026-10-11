@@ -84,21 +84,28 @@ const FOCUS_JS = `(() => {
 })()`;
 
 const PROBE_JS = `(() => {
+  const CAPTCHA_SRC = /recaptcha\\/api2\\/(anchor|bframe)|hcaptcha|challenges\\.cloudflare\\.com|arkoselabs|funcaptcha/i;
+  const CARD_SRC = /js\\.stripe\\.com\\/v3\\/elements-inner-(card|payment)|hosted-fields|securedfields|pci-connect\\.squareup\\.com|checkout\\.com/i;
   const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 2 && r.height > 2 && s.visibility !== "hidden" && s.display !== "none"; };
   const q = (s) => Array.from(document.querySelectorAll(s)).filter(vis);
   const text = (document.body ? document.body.innerText : "").slice(0, 4000);
   return {
     hasPassword: q('input[type=password]').length > 0,
-    hasCaptcha: q('.g-recaptcha,.h-captcha,.cf-turnstile,[data-sitekey],iframe[src*="captcha"],iframe[src*="turnstile"]').length > 0 || /verify (that )?you are (a )?human|i'm not a robot/i.test(text),
-    hasCardField: q('input[autocomplete^="cc-"],input[name*="cardnumber" i],input[id*="cardnumber" i],input[name*="card_number" i],input[name*="cvv" i],input[name*="cvc" i]').length > 0,
+    // Visible, widget-sized only: invisible reCAPTCHA v3 / Stripe controller
+    // frames load on ordinary pages and must not trigger a takeover.
+    hasCaptcha: q('.g-recaptcha,.h-captcha,.cf-turnstile,iframe').some((e) => {
+      const r = e.getBoundingClientRect();
+      const src = e.tagName === "IFRAME" ? (e.getAttribute("src") || "") : "captcha";
+      return r.width >= 100 && r.height >= 60 && !/size=invisible/.test(src) && (e.tagName !== "IFRAME" || CAPTCHA_SRC.test(src));
+    }) || /verify (that )?you are (a )?human|i'm not a robot/i.test(text),
+    hasCardField: q('input[autocomplete^="cc-"],input[name*="cardnumber" i],input[id*="cardnumber" i],input[name*="card_number" i],input[name*="cvv" i],input[name*="cvc" i]').length > 0
+      || q('iframe').some((e) => CARD_SRC.test(e.getAttribute("src") || "") && e.getBoundingClientRect().height >= 20),
     hasTwoFactor: q('input[autocomplete="one-time-code"]').length > 0,
   };
 })()`;
 
 const TEXT_JS = `(document.body ? document.body.innerText : "").slice(0, 20000)`;
 
-const CAPTCHA_FRAME = /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|captcha/i;
-const CARD_FRAME = /js\.stripe\.com\/v3\/elements-inner-(card|payment)|braintreegateway\.com.*hosted-fields|checkoutshopper.*securedfields|pci-connect\.squareup\.com|secure\.checkout\.com|paypal\.com\/.*(card|smart)/i;
 
 /**
  * deps: { getKey() -> string|null, broadcast(event), parent() -> BrowserWindow|null }
@@ -252,9 +259,6 @@ function createAgentController(deps, options = {}) {
     const frames = wc.mainFrame.framesInSubtree.filter((f) => f !== wc.mainFrame);
     const out = { url: wc.getURL(), title: wc.getTitle(), ...main };
     for (const f of frames) {
-      const u = f.url || "";
-      if (CAPTCHA_FRAME.test(u)) out.hasCaptcha = true;
-      if (CARD_FRAME.test(u)) out.hasCardField = true;
       // Same-origin and cross-origin frames both get the field scan.
       const r = await f.executeJavaScript(PROBE_JS).catch(() => null);
       if (r) for (const k of ["hasPassword", "hasCaptcha", "hasCardField", "hasTwoFactor"]) out[k] = out[k] || r[k];

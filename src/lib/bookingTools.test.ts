@@ -129,6 +129,14 @@ describe("book_appointment: confirmation #1 is checked in code", () => {
     expect(JSON.stringify(r)).not.toMatch(/"status":"booked"/);
   });
 
+  it("a yes without the hold id (history is text-only) books the plan just read back", async () => {
+    const { cal } = calendar();
+    const p = (await runBookingTool("propose_booking", FULL, {}, cal)) as any;
+    const r = (await runBookingTool("book_appointment", { confirmed: true }, { userText: "yes please" }, cal)) as any;
+    expect(r.status).toBe("started");
+    expect(agent.started[0]).toMatchObject({ holdBlockId: p.hold_block_id });
+  });
+
   it("without the desktop app it hands over a link", async () => {
     agent.available = false;
     const { cal } = calendar();

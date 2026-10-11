@@ -105,7 +105,7 @@ export const BOOKING_TOOL_SCHEMAS: ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: { hold_block_id: str, confirmed: { type: "boolean" } },
-        required: ["hold_block_id"],
+        required: [],
       },
     },
   },
@@ -145,11 +145,14 @@ export type BookingToolContext = { userText?: string };
 const drafts = new Map<string, BookingDraft>();
 let building: BookingDraft | null = null;
 let pendingSuggestion: { slot: SlotKey; value: string } | null = null;
+/** The plan last read back: "yes" on the next turn means this one. */
+let lastProposedHold: string | null = null;
 
 export function resetBookingState() {
   drafts.clear();
   building = null;
   pendingSuggestion = null;
+  lastProposedHold = null;
 }
 
 const text = (v: unknown) => {
@@ -278,6 +281,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       for (const [k, v] of drafts) if (k !== holdId && v.venue === d.venue) drafts.delete(k);
       drafts.set(holdId, d);
       building = d;
+      lastProposedHold = holdId;
       return {
         proposed: true,
         summary: formatPlan(d),
@@ -287,7 +291,10 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
     }
 
     case "book_appointment": {
-      const holdId = text(args.hold_block_id);
+      // Past turns reach the planner as text only, so the hold id from the
+      // read-back is often missing on the "yes" turn: fall back to that plan.
+      const asked = text(args.hold_block_id);
+      const holdId = asked && drafts.has(asked) ? asked : lastProposedHold;
       const d = (holdId && drafts.get(holdId)) || null;
       if (!d || !holdId) return { error: "No proposed booking with that hold_block_id. Call propose_booking first and read the plan back." };
       if (args.confirmed !== true) {

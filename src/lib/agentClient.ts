@@ -18,6 +18,7 @@ import { db } from "./db";
 import { emitDataChange } from "./supaDb";
 import { finalHoldTitle, type AgentTask } from "./bookingTask";
 import { saveBookingRecord } from "./bookingRecords";
+import { getSecret } from "./secrets";
 
 export type AgentEvent =
   | { type: "status"; state: string; text: string; at?: number }
@@ -142,7 +143,12 @@ export function backend(): AgentBackend | null {
   if (d) {
     return {
       kind: "local",
-      start: (t) => d.start(t),
+      start: async (t) => {
+        // A key synced from another device lands in the keychain on first read;
+        // the main process reads it from there (and sends it only to OpenAI).
+        await getSecret("browser_key").catch(() => null);
+        return d.start(t);
+      },
       answer: (t) => d.answer(t),
       confirm: (y) => d.confirm(y),
       continue: () => d.continue(),

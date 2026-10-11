@@ -174,7 +174,7 @@ Planner stays on `llm_key` and never reads `browser_key`. No schema change, no m
 - [x] Agent window (fixed 1280x800 site view + "Rocky is driving" banner with Stop),
       capturePage screenshots, sendInputEvent input, IPC start/answer/confirm/continue/cancel.
 - [x] Fake multi-step booking site (`electron/test/fixtures`) + scripted-model Electron run
-      (`npm run test:agent-e2e`, 15 checks: real clicks/typing, ask/resume, injection refused,
+      (`npm run test:agent-e2e`, 17 checks: real clicks/typing, ask/resume, injection refused,
       final click blocked until yes, exactly one booking after it, reference read off the page).
 - [x] Generic task types (restaurant / appointment / tickets) and slots; planner tools
       find_place, propose_booking, book_appointment, answer_agent_question, continue_agent.
@@ -290,3 +290,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Booking Agent v2 started (Phase 8): main-process computer-use core with code-enforced safety gates and limits, 35 unit tests. Not wired to the app yet.
 - 2026-10-10: Booking Agent v2 wired in: agent window (banner + Stop, capturePage, sendInputEvent, isolated-world DOM probes for the gates), IPC start/answer/confirm/continue/cancel + events, generic planner tools (find_place, propose_booking, book_appointment, answer_agent_question, continue_agent), laptop agent card + spoken questions, local evidence records. Old selector agent (`browserAgent.ts`, `browserDriver.ts`) removed. `build:electron` now runs on Windows too (`scripts/build-electron.mjs`). 128 unit tests + 15-check Electron E2E.
 - 2026-10-10: Booking Agent v2 phone relay over `commands` (no migration): phone card + spoken questions, laptop host runs the agent, sanitized events only. 131 unit tests.
+- 2026-10-10: Booking Agent v2 review fixes: CAPTCHA/card detection counts visible widgets only (invisible reCAPTCHA v3 no longer forces a takeover; E2E proves both ways), a visible password box alone no longer stops the run (typing into one still does), "yes" without a hold id books the plan just read back (planner history is text-only), a browser key synced from another device is pulled into the keychain before the agent starts. 133 unit tests + 17-check E2E.

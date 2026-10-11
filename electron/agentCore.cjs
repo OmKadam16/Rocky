@@ -927,9 +927,10 @@ class BookingRun {
         ? ["payment", "This is the payment step. Pay yourself in the window if you want to go ahead, then say continue."]
         : p.hasTwoFactor
           ? ["two_factor", "This page wants a verification code. Enter it yourself in the window, then say continue."]
-          : p.hasPassword
-            ? ["login", "This page wants you to sign in. Sign in yourself in the window, then say continue."]
-            : null;
+          : null;
+    // A visible password box alone doesn't stop the run (many pages offer
+    // "continue as guest"); typing into one always does (runAction), and a
+    // real login wall is the model's handoff_to_user.
     if (!hit) return false;
     if (this.acknowledged.has(`${hit[0]}@${p.url}`)) return false;
     this.takeover(hit[0], hit[1]);
