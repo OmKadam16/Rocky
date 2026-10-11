@@ -12,7 +12,7 @@ const TABS: { id: PhoneTab; label: string; Icon: typeof ChatIcon }[] = [
 /** Bottom nav: Chat · Calendar, with the same sliding pill as the view tabs. */
 export default function PhoneTabBar({ tab, onChange }: { tab: PhoneTab; onChange: (t: PhoneTab) => void }) {
   return (
-    <nav className="flex-none border-t border-line bg-canvas px-5 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2">
+    <nav className="flex-none border-t border-line bg-canvas px-5 pb-[calc(0.5rem+var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] pt-2">
       <div role="tablist" aria-label="Rocky" className="grid grid-cols-2 gap-1 rounded-[3px] border border-line bg-card p-1">
         {TABS.map(({ id, label, Icon }) => {
           const active = tab === id;

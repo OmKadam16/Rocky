@@ -272,3 +272,14 @@ body {
   background: var(--color-line-scroll);
   border-radius: 3px;
 }
+
+/* Android app (Capacitor): no overscroll bounce or double-tap zoom; the
+   pair and sign-in screens clear the status bar (the phone home pads itself). */
+html.native-app,
+html.native-app body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+html.native-app #root {
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+}

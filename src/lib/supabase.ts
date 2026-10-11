@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isNativeApp, secureAuthStorage } from "./native";
 
 /**
  * The Supabase client. Rocky stores accounts and calendar data here so the
@@ -18,7 +19,16 @@ export function supabase(): SupabaseClient {
   if (!isSupabaseConfigured) throw new Error("Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).");
   if (!client) {
     client = createClient(url!, anonKey!, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        // In the Android app, email links come back through a deep link
+        // (handled in the phone shell), and the session lives in
+        // Keystore-backed storage instead of the WebView's localStorage.
+        detectSessionInUrl: !isNativeApp(),
+        flowType: "pkce",
+        ...(isNativeApp() ? { storage: secureAuthStorage() } : {}),
+      },
     });
   }
   return client;

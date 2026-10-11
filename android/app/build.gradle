@@ -1,0 +1,104 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+import groovy.json.JsonSlurper
+
+// One version for everything: package.json "version" (x.y.z).
+// versionCode = x*10000 + y*100 + z, so it only ever goes up as long as y and
+// z stay below 100 (bump the next part instead of going to x.y.100).
+def pkg = new JsonSlurper().parse(file('../../package.json'))
+def appVersion = pkg.version as String
+def parts = appVersion.tokenize('.-')[0..2].collect { it as int }
+if (parts[1] > 99 || parts[2] > 99) throw new GradleException("Version $appVersion: minor and patch must be 0-99 (versionCode = major*10000 + minor*100 + patch)")
+def appVersionCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
+
+// Release signing comes from the environment or ~/.gradle/gradle.properties,
+// never from this repo: ROCKY_KEYSTORE_FILE, ROCKY_KEYSTORE_PASSWORD,
+// ROCKY_KEY_ALIAS, ROCKY_KEY_PASSWORD (see scripts/android-keystore.md).
+def signingValue = { String name -> System.getenv(name) ?: (project.findProperty(name) as String) }
+def releaseStore = signingValue('ROCKY_KEYSTORE_FILE')
+
+android {
+    namespace = "com.rocky.calendar.android"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.rocky.calendar.android"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersion
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (releaseStore) {
+            release {
+                storeFile file(releaseStore)
+                storePassword signingValue('ROCKY_KEYSTORE_PASSWORD')
+                keyAlias signingValue('ROCKY_KEY_ALIAS')
+                keyPassword signingValue('ROCKY_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseStore) signingConfig signingConfigs.release
+        }
+    }
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
+// A release APK must be signed with the one Rocky keystore; refuse otherwise.
+tasks.matching { it.name == 'assembleRelease' }.configureEach {
+    doFirst {
+        if (!releaseStore) throw new GradleException("Release signing not configured: set ROCKY_KEYSTORE_FILE, ROCKY_KEYSTORE_PASSWORD, ROCKY_KEY_ALIAS and ROCKY_KEY_PASSWORD (scripts/android-keystore.md).")
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

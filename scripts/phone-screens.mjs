@@ -10,7 +10,7 @@
 //     and the tab bar steps aside.
 // Exits 1 if any check fails.
 import { createServer } from "vite";
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
 

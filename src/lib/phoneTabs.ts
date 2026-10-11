@@ -80,3 +80,10 @@ export function toastReducer(s: ToastState, e: ToastEvent): ToastState {
       return { ...s, visible: false };
   }
 }
+
+/** Android Back: close the settings sheet, then Chat -> Calendar, then leave the app. */
+export function backAction(s: { tab: PhoneTab; settingsOpen: boolean }): "close-settings" | "to-calendar" | "exit" {
+  if (s.settingsOpen) return "close-settings";
+  if (s.tab === "chat") return "to-calendar";
+  return "exit";
+}

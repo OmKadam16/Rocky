@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Rocky</string>
+    <string name="title_activity_main">Rocky</string>
+    <string name="package_name">com.rocky.calendar.android</string>
+    <string name="custom_url_scheme">com.rocky.calendar.android</string>
+</resources>

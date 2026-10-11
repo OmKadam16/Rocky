@@ -96,7 +96,7 @@ export default function PhoneUrlLine() {
           {!url && <div className="font-mono text-[10.5px] text-warm">No phone address yet: paste your Rocky website address.</div>}
         </div>
       )}
-      <div className="mt-1.5 font-mono text-[10.5px] text-grey-soft">and enter this code</div>
+      <div className="mt-1.5 font-mono text-[10.5px] text-grey-soft">and enter this code (in the Rocky Android app, just enter the code)</div>
       {warning && !editing && <div className="mt-1.5 font-mono text-[10.5px] leading-[1.5] text-warm">{warning}</div>}
       {error && <div className="mt-1.5 font-mono text-[10.5px] text-warm">{error}</div>}
       {url && !editing && (

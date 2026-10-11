@@ -1,3 +1,4 @@
+import { authRedirectUrl } from "../lib/native";
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useTheme } from "../hooks/useTheme";
@@ -68,13 +69,13 @@ export default function AuthScreen({ initialMode = "signin", notice = null, onRe
         const { data, error: e } = await sb.auth.signUp({
           email: mail,
           password,
-          options: { data: { display_name: name.trim() }, emailRedirectTo: window.location.origin },
+          options: { data: { display_name: name.trim() }, emailRedirectTo: authRedirectUrl() },
         });
         if (e) throw e;
         try { localStorage.setItem("vc-user-name", name.trim()); } catch {}
         if (!data.session) setInfo("Check your inbox to confirm your email, then sign in.");
       } else if (mode === "forgot") {
-        const { error: e } = await sb.auth.resetPasswordForEmail(mail, { redirectTo: window.location.origin });
+        const { error: e } = await sb.auth.resetPasswordForEmail(mail, { redirectTo: authRedirectUrl() });
         if (e) throw e;
         setInfo("If that email has an account, a reset link is on its way.");
       } else {

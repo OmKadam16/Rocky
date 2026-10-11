@@ -27,6 +27,9 @@ import PhoneTabBar from "./phone/PhoneTabBar";
 import PhoneChat from "./phone/PhoneChat";
 import CalendarDock from "./phone/CalendarDock";
 import LaptopChip, { SettingsButton } from "./phone/LaptopChip";
+import AppUpdateCard from "./phone/AppUpdateCard";
+import { useNativePhone } from "../hooks/useNativePhone";
+import { useAgentView } from "../hooks/useAgentView";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -96,15 +99,34 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
     return startAgentRelayClient();
   }, []);
 
+  const agent = useAgentView();
+  const { online } = useNativePhone({
+    tab,
+    setTab,
+    settingsOpen,
+    closeSettings: () => setSettingsOpen(false),
+    agentRunning: !["idle", "done", "failed", "cancelled"].includes(agent.phase),
+  });
+
   const dayList = selected === today ? day.events : (week.days.find((d) => d.date === selected)?.events ?? []);
   const next = selected === today ? dayList.find((e) => e.status === "now") ?? dayList.find((e) => e.status === "upcoming") ?? null : null;
 
   // The shell is the visible viewport: with the keyboard up the composer
   // stays above it and the tab bar steps aside.
-  const shellStyle = viewport.height ? { height: viewport.height, top: viewport.top } : undefined;
+  // The top inset clears the status bar in the edge-to-edge Android app
+  // (Capacitor injects --safe-area-inset-top; browsers fall back to env()).
+  const shellStyle = {
+    ...(viewport.height ? { height: viewport.height, top: viewport.top } : {}),
+    paddingTop: "var(--safe-area-inset-top, env(safe-area-inset-top, 0px))",
+  };
 
   return (
     <div className="fixed inset-x-0 top-0 mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-canvas text-ink" style={shellStyle}>
+      {!online && (
+        <div role="status" className="flex-none border-b border-line bg-warm-soft px-5 py-2 text-13 text-ink-soft">
+          You're offline. The calendar shows what it last loaded; Rocky needs the internet to answer.
+        </div>
+      )}
       <AnimatePresence mode="wait" initial={false}>
         {tab === "calendar" ? (
           <motion.div
@@ -203,7 +225,8 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
                   {LAPTOP_ASLEEP_MESSAGE}
                 </div>
               )}
-              {/* Runs once when the home opens; opens itself only on a problem. */}
+              <AppUpdateCard />
+          {/* Runs once when the home opens; opens itself only on a problem. */}
               <ConnectionCheck probes={probes} runKey={1} />
             </div>
             {loading ? (

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- --color-canvas / --color-ink from src/index.css (dark). -->
+    <color name="rocky_canvas">#131415</color>
+    <color name="rocky_ink">#EFEEEA</color>
+    <color name="colorPrimary">#EFEEEA</color>
+    <color name="colorPrimaryDark">#131415</color>
+    <color name="colorAccent">#2E9E78</color>
+</resources>

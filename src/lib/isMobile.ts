@@ -1,3 +1,4 @@
+import { isNativeApp } from "./native";
 /**
  * Mobile detection for routing phones to the mobile UI (/remote-style
  * calendar + talk only) instead of the desktop app. Desktop browsers —
@@ -5,6 +6,7 @@
  */
 
 export interface MobileSignals {
+  nativeApp?: boolean;
   userAgent?: string;
   coarsePointer?: boolean;
   smallestScreenPx?: number;
@@ -33,6 +35,8 @@ export function isMobileDevice(signals: MobileSignals = {}): boolean {
 
 /** True when the phone UI should render: the /remote route or any phone. */
 export function shouldShowMobileUi(pathname: string, signals: MobileSignals = {}): boolean {
+  // The Android app is always the phone UI, whatever the screen width.
+  if (signals.nativeApp ?? isNativeApp()) return true;
   if (pathname === "/remote") return true;
   return isMobileDevice(signals);
 }

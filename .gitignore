@@ -24,3 +24,9 @@ extension/dist
 release-*
 # Phone screenshot harness output (npm run screens:phone)
 test-results/
+
+# Android signing: never in git
+*.jks
+*.keystore
+keystore.properties
+android/app/release/
