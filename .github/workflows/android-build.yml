@@ -1,0 +1,46 @@
+# Debug APK on every push to main that touches the app (and by hand).
+# Download it from the run's "Artifacts" (rocky-debug-apk).
+# Uses repo secrets VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY / VITE_PUBLIC_URL
+# when present; without them the APK runs with no account (can't pair).
+name: Android debug APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "shared/**", "android/**", "package.json", "package-lock.json", "capacitor.config.ts", "vite.config.ts", "index.html", ".github/workflows/android-build.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_PUBLIC_URL: ${{ secrets.VITE_PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+      - run: npm run build:android:web
+      - name: Gradle assembleDebug
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: APK size
+        run: ls -l android/app/build/outputs/apk/debug/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rocky-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

@@ -31,6 +31,8 @@ import { startAgentRelayHost } from "./lib/agentRelay";
 import { isDesktop, syncSecretsOnce } from "./lib/secrets";
 import { askMemory, memoryBridge } from "./lib/memoryClient";
 import { startMemoryRelayHost } from "./lib/memoryRelayLive";
+import { applyAutoUpdate, loadAutoUpdate } from "./lib/autoUpdateSetting";
+import { UPDATES_ENABLED } from "./lib/features";
 import { db } from "./lib/db";
 import { toISODate } from "../shared/datetime";
 import type { ChatCard, PageName, ViewName } from "./types";
@@ -121,6 +123,11 @@ export default function App() {
     if (!isSupabaseConfigured || authLoading || !user || !isDesktop()) return;
     void syncSecretsOnce().catch(() => {});
   }, [authLoading, user]);
+  // Desktop: background update checks (start + every 6 h) unless turned off.
+  useEffect(() => {
+    if (!UPDATES_ENABLED || !isDesktop() || authLoading) return;
+    void loadAutoUpdate().then(applyAutoUpdate);
+  }, [authLoading]);
   // Desktop: answer Memory questions from the paired phone, locally.
   useEffect(() => {
     if (!isSupabaseConfigured || authLoading || !user || !memoryBridge()) return;

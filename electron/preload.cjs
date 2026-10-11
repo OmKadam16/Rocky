@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("rocky", {
     check: () => ipcRenderer.invoke("update:check"),
     download: () => ipcRenderer.invoke("update:download"),
     install: () => ipcRenderer.invoke("update:install"),
+    /** Check on start + every 6 h and download in the background (restart still asks). */
+    auto: (on) => ipcRenderer.invoke("update:auto", on === true),
     /** Subscribe to progress; returns an unsubscribe function. */
     onState: (handler) => {
       const listener = (_event, payload) => handler(payload);

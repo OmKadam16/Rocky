@@ -279,8 +279,10 @@ function explain(err) {
 
   if (/404/.test(raw)) return "No published releases yet — nothing to update to.";
   if (/ENOTFOUND|EAI_AGAIN|ENETUNREACH|ETIMEDOUT/i.test(raw)) return "Couldn't reach the update server.";
-  if (/code ?signature|not signed|rejected by/i.test(raw)) {
-    return "This build isn't code-signed, so macOS won't install the update.";
+  if (/code ?signature|not signed|rejected by|publisherName|signed by/i.test(raw)) {
+    return process.platform === "win32"
+      ? "Windows refused the update because Rocky isn't code-signed. Download the new installer from the releases page and run it (choose More info → Run anyway if SmartScreen asks)."
+      : "This build isn't code-signed, so macOS won't install the update.";
   }
   if (/sha512|checksum/i.test(raw)) return "The download didn't match its checksum.";
 
@@ -411,9 +413,16 @@ function registerShell() {
   });
 }
 
+const AUTO_CHECK_MS = 6 * 60 * 60 * 1000;
+let autoTimer = null;
+
 function registerUpdates() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Rocky's Windows builds aren't code-signed: with no publisherName in
+  // app-update.yml electron-updater skips the signature check and relies on
+  // the sha512 in latest.yml. Full downloads only (no differential patching).
+  autoUpdater.disableDifferentialDownload = true;
 
   const broadcast = (state, extra) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -453,6 +462,20 @@ function registerUpdates() {
     } catch (err) {
       return { state: "error", message: explain(err) };
     }
+  });
+
+  // "Check automatically on start and every 6 hours, download in the
+  // background, ask before restarting" (profile extra, default on). The
+  // renderer turns it on or off; restarting stays the user's press.
+  ipcMain.handle("update:auto", async (_event, on) => {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = null;
+    autoUpdater.autoDownload = on === true;
+    if (on !== true || !app.isPackaged) return { auto: on === true };
+    const check = () => autoUpdater.checkForUpdates().catch((err) => broadcast("error", { message: explain(err) }));
+    void check();
+    autoTimer = setInterval(check, AUTO_CHECK_MS);
+    return { auto: true };
   });
 
   ipcMain.handle("update:install", () => {

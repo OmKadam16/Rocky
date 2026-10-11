@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { UPDATES_ENABLED } from "../lib/features";
+import { autoUpdateOn, loadAutoUpdate, setAutoUpdate } from "../lib/autoUpdateSetting";
 
 /**
  * "Check for updates" for the desktop build.
@@ -44,6 +45,10 @@ export default function UpdateCard() {
   const api = bridge()?.updates;
   const [version, setVersion] = useState("");
   const [status, setStatus] = useState<State>({ state: "idle" });
+  const [auto, setAuto] = useState(() => autoUpdateOn());
+  useEffect(() => {
+    void loadAutoUpdate().then(setAuto);
+  }, []);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -115,6 +120,21 @@ export default function UpdateCard() {
             style={{ width: `${status.percent ?? 0}%` }}
           />
         </div>
+      )}
+
+      {UPDATES_ENABLED && (
+        <label className="mt-3 flex cursor-pointer items-start gap-2 font-mono text-[10.5px] leading-[1.5] text-grey-soft">
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => {
+              setAuto(e.target.checked);
+              void setAutoUpdate(e.target.checked).catch(() => {});
+            }}
+            className="mt-[2px] cursor-pointer accent-[var(--color-accent)]"
+          />
+          <span>Check automatically on start and every 6 hours, download in the background, ask before restarting</span>
+        </label>
       )}
 
       {action && (
