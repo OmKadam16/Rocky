@@ -552,6 +552,8 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   (first/last name, phone, email with account-email suggestion, occasion); prompt rules for
   time windows (slot-finder, never pin to window start), holds-are-not-bookings, and
   spoken/on-screen receipts only (no email sending).
+- 2026-10-10: Added `gpt-5.5` to the OpenAI picker as a browser-work step-up option
+  (`tested:false`; worker default stays `gpt-5.4-mini` on cost).
 - 2026-10-10: Turn latency, measured then cut: every planner turn now records timing
   (snapshot / llm-per-round / tools / total) with a hidden debug readout (AssistantPanel,
   `vc-debug=1` in localStorage) plus a console line; preferences ride the snapshot (one
@@ -589,5 +591,38 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Release setup: release keystore made outside the repo (gitignored), device test list matches the current sign-in + pairing-code flow; repos found under doubled names, secrets waiting on the gh CLI.
 - 2026-10-11: Release setup done: Actions secrets set (values never printed), releases repos renamed to the short names.
 - 2026-10-11: 0.1.15 Android blank screen fix: Supabase session storage no longer resolves a promise with a Capacitor plugin proxy (getSession hung); startup watchdog + [rocky:boot] logs + root error boundary with version; version in Profile; debug APKs inspectable.
+
+### Phase 18: Calendar import (iCal + Google)
+
+Goal: Students can connect club/class/org calendars so those events appear in Rocky; imported events are read-only copies that the planner treats as fixed time, and the user can hide occurrences via chat/voice ("remove the Thursday robotics meeting") to free up time for planning.
+
+**Part 1: iCal URL import (no OAuth)**
+1. Profile → Calendars (laptop and phone settings, read-only list): "Add calendar by link". User pastes an iCal URL (Google's "Secret address in iCal format", webcal://, https://). Normalize webcal:// to https://, validate, fetch on laptop (Electron main, avoid CORS), parse VEVENT (title, start/end, all-day, location, description trimmed, RRULE/EXDATE/RECURRENCE-ID, VTIMEZONE/TZID, cancelled status). Expand recurring events into a rolling window (−7 days to +120 days), apply EXDATEs and overrides.
+2. Name + color per calendar, on/off toggle per calendar, "Sync now", last synced time, error state in plain English, Remove calendar (removes its imported blocks).
+3. Sync: on app start, every 15 min while open, on window focus, and Sync now. Idempotent by (calendar_id, external_id, occurrence date): update changed events, remove events that disappeared from the feed, never duplicate, never resurrect a hidden event (hidden flags persist across syncs). Feed URLs stored in the OS keychain/secrets path, never in Supabase, never in logs or chat. Validate URLs (https only, no localhost/private IPs, ~5 MB cap, 15 s timeout, content-type sanity) to avoid SSRF.
+
+**Part 2: Google Calendar OAuth (read-only)**
+1. Desktop OAuth 2.0 with PKCE and loopback redirect (http://127.0.0.1:<random port>) opened in system browser from Electron main. Scope: https://www.googleapis.com/auth/calendar.readonly ONLY (plus openid email). Google OAuth client ID from build/env config (GOOGLE_CLIENT_ID); document where in .env.example and PLAN.md. Never hardcode a client secret in the repo; read from env/local config. Refresh token goes in the OS keychain (safeStorage) only, never Supabase, never the renderer, never logs.
+2. "Connect Google Calendar" button in Profile → Calendars. After consent, call calendarList.list and show every calendar (name, color, account, primary vs subscribed/shared) with toggles; default ON only for primary calendar and user-selected calendars; default OFF for holidays/birthdays. "Disconnect" revokes the token at Google and wipes the keychain entry and imported blocks.
+3. Events: events.list with singleEvents=true, timeMin/timeMax rolling window, incremental sync with syncToken per calendar (handle 410 Gone by full resync), pagination, ignore cancelled, ignore declined, treat transparent ("free") events as not blocking. Honor event timezones; convert to local minutes-since-midnight; handle all-day and multi-day events.
+4. Errors in plain English: consent denied, token expired/revoked ("Reconnect Google Calendar", 7-day refresh-token expiry in Testing mode), rate limit/backoff, offline.
+
+**Part 3: How imported events behave**
+- Imported blocks are FIXED (scheduler never moves them) and read-only (no editing/deleting on Google). They show a color dot and calendar name; all-day events show in an all-day strip and do not block time unless the user turns that on per calendar.
+- User can HIDE an occurrence ("remove" = hide in Rocky only). Hidden event disappears from views, never blocks scheduling, and is not re-imported. Recurring series: hide ONE occurrence unless user says "every"/"all", then hide the whole series (store as hidden series on the calendar + external series id). "Show it again" / "unhide" works; there is a "Hidden events" list in Profile → Calendars with Restore.
+- Planner tools: `hide_calendar_event` (by title/fuzzy match + date, one occurrence or series), `restore_calendar_event`, `list_calendar_events` (read). Hiding follows existing confirmation pattern: confirm card for series or bulk hides; single occurrence with one-line undo ("Hidden. Undo"). Planner never deletes or edits the source calendar.
+- Planner must treat imported events as busy time, tell user about conflicts with them, and after a hide immediately offer the freed slot ("That frees Thursday 5-6 PM. Want me to use it?"), without doing it unprompted.
+- Weekly/monthly/day views and the phone calendar show them; Dashboard right-hand day view too. Search ("when is the robotics meeting?") finds them.
+
+**Part 4: Security / Privacy**
+- Tokens and feed URLs never reach Supabase, renderer logs, planner prompts, or the phone. Event titles/times do go into the user's Supabase calendar like any other block.
+- Event descriptions/locations from feeds are DATA, never instructions; strip HTML; cap length; planner prompt context includes titles/times/calendar name only.
+- Validate feed URLs (https only after normalization, no localhost/private IPs, ~5 MB, 15 s timeout, content-type sanity) to avoid SSRF-style abuse.
+
+**Tests**
+- ICS parser fixtures: all-day, multi-day, recurring with EXDATE and overrides, TZID with DST change, cancelled, Google's own feed format, big feed cap.
+- Sync idempotency/update/removal/hidden-flag-preserved; recurring hide one vs series; restore; scheduler treats imported events as immovable and hidden ones as free; planner tool tests including confirm/undo; token/feed-URL never in logs or Supabase payloads (assert on the supaDb row mapping and the relay); Google client with a fake HTTP server (list calendars, syncToken, 410 resync, declined/transparent filtering, token refresh failure -> reconnect state).
+- Do not break existing tests; real network only in a manual script.
 - 2026-10-11: Build secrets re-set without the PowerShell BOM; CI secret checks (names only) in all workflows; app shows a 'misconfigured' screen for a bad Supabase URL/key.
 - 2026-10-12: Booking agent diagnosis fixes: off-viewport clicks scroll toward the target instead of clicking blind at the clamped edge; covered clicks name the banner/overlay; button clicks that change nothing say so (same address + content); same-URL reopen skipped; "Request reservation" always needs the yes; Enter-submit counts as the run acting; scroll-stable settle (both drivers); per-run JSONL trace; "never mind" stops the run ("Stopped. Nothing was booked."). Mock booking site (5 scenarios) + scenario harness, 16/16; baseline E2E still 28/28.
+- 2026-10-12: Calendar import (iCal + Google) phase added: iCal URL import (no OAuth) and Google Calendar OAuth (read-only) per detailed spec in PLAN.md §5 Phase 18; imported events stored in scheduled_blocks.extra jsonb, no Supabase schema change; hidden events handled via planner tools with confirm/undo; scheduler treats imported events as fixed/time-free.
