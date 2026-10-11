@@ -321,18 +321,31 @@ describe("one question at a time, never for what we know", () => {
 });
 
 describe("limits and loops", () => {
-  it("stops at the step limit and says where it got stuck", async () => {
+  it("hands over (not dies) at the step limit, and continue grants more steps", async () => {
     const h = harness({ limits: { maxSteps: 3 }, script: (n) => cc(click(10 + n * 50, 10)) });
     await h.run.start();
-    expect(h.run.state).toBe("failed");
-    expect(h.ofType("failed")[0]).toMatchObject({ holdBlockId: "hold-1" });
-    expect(h.ofType("failed")[0].reason).toMatch(/3-step limit.*last step/);
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.ofType("failed")).toHaveLength(0);
+    const first = h.ofType("needs_user_takeover")[0];
+    expect(first).toMatchObject({ reason: "limits" });
+    expect(first.message).toMatch(/3-step limit.*last step/);
+    expect(first.message).toMatch(/say continue/i);
+    expect(h.run.continueRun()).toBe(true);
+    await h.run.current;
+    // 3 + 20 more requests, then handed over again — failed never fires.
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.ofType("failed")).toHaveLength(0);
+    expect(h.bodies).toHaveLength(23);
+    expect(h.ofType("needs_user_takeover")).toHaveLength(2);
   });
 
-  it("stops at the active-time limit", async () => {
+  it("hands over at the active-time limit", async () => {
     const h = harness({ limits: { maxActiveMs: 5000 }, clockStep: 2000, script: (n) => cc(click(10 + n * 50, 10)) });
     await h.run.start();
-    expect(h.ofType("failed")[0].reason).toMatch(/minute limit/);
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.ofType("failed")).toHaveLength(0);
+    expect(h.ofType("needs_user_takeover")[0]).toMatchObject({ reason: "limits" });
+    expect(h.ofType("needs_user_takeover")[0].message).toMatch(/minute limit/);
   });
 
   it("time spent waiting for the user doesn't count", async () => {
@@ -351,6 +364,22 @@ describe("limits and loops", () => {
     const h = harness({ script: () => cc(click(100, 100)) });
     await h.run.start();
     expect(h.ofType("failed")[0].reason).toMatch(/Stuck repeating/);
+  });
+
+  it("hands over when the model only looks at the page instead of acting", async () => {
+    const shot = { type: "screenshot" };
+    const h = harness({ script: () => cc(shot) });
+    await h.run.start();
+    // 4 look-only requests, then a handoff — not 40 burned requests + a fail.
+    expect(h.bodies).toHaveLength(4);
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.ofType("failed")).toHaveLength(0);
+    expect(h.ofType("needs_user_takeover")[0]).toMatchObject({ reason: "stuck" });
+    // Saying continue resumes with a clean streak.
+    expect(h.run.continueRun()).toBe(true);
+    expect(h.run.state).toBe("running");
+    h.run.cancel();
+    expect(h.run.state).toBe("cancelled");
   });
 
   it("stops at the screenshot limit", async () => {

@@ -702,6 +702,8 @@ class BookingRun {
     this.enterPressed = false;
     this.notes = [];
     this.recent = [];
+    /** Screenshot-only computer_calls in a row (model hesitating, see runComputerCall). */
+    this.lookStreak = 0;
     /** Per-run trace (step log + timings + notes, screenshots stripped). */
     this.trail = [];
     this.lastStep = "";
@@ -848,6 +850,9 @@ class BookingRun {
     if (this.state !== "waiting_takeover" || !this.pending) return false;
     const p = this.pending;
     this.pending = null;
+    // Continuing past a limit must actually continue: grant 20 more steps so
+    // the resumed drive doesn't trip the same limit on its first request.
+    if (p.reason === "limits") this.limits = { ...this.limits, maxSteps: this.steps + 20 };
     this.userActed = true;
     this.acknowledged.add(`${p.reason}@${p.url}`);
     if (p.callId) {
@@ -875,6 +880,7 @@ class BookingRun {
 
   resume(text) {
     this.state = "running";
+    this.lookStreak = 0;
     this.resumedAt = this.deps.now();
     this.status(text);
     this.current = this.drive();
@@ -915,9 +921,9 @@ class BookingRun {
 
   limitHit() {
     const active = this.activeMs + (this.resumedAt != null ? this.deps.now() - this.resumedAt : 0);
-    if (this.steps >= this.limits.maxSteps) return `Hit the ${this.limits.maxSteps}-step limit`;
-    if (active >= this.limits.maxActiveMs) return `Hit the ${Math.round(this.limits.maxActiveMs / 60000)}-minute limit`;
-    if (this.screenshots >= this.limits.maxScreenshots) return "Hit the screenshot limit";
+    if (this.steps >= this.limits.maxSteps) return { kind: "steps", text: `Hit the ${this.limits.maxSteps}-step limit` };
+    if (active >= this.limits.maxActiveMs) return { kind: "time", text: `Hit the ${Math.round(this.limits.maxActiveMs / 60000)}-minute limit` };
+    if (this.screenshots >= this.limits.maxScreenshots) return { kind: "shots", text: "Hit the screenshot limit" };
     return null;
   }
 
@@ -976,7 +982,15 @@ class BookingRun {
         }
         const limit = this.limitHit();
         if (limit) {
-          this.fail(`${limit}${this.lastStep ? ` (last step: ${this.lastStep})` : ""}`);
+          const where = `${limit.text}${this.lastStep ? ` (last step: ${this.lastStep})` : ""}`;
+          if (limit.kind === "shots") {
+            // Blind from here on: no point handing over a run that can't see.
+            this.fail(where);
+          } else {
+            // Steps or time ran out mid-run: hand the open page to the user
+            // instead of dying. Saying continue grants 20 more steps.
+            this.takeover("limits", `${where} — everything so far is on the page in front of you. Take over in the window, or say continue and I'll keep going.`);
+          }
           break;
         }
         const response = await this.request();
@@ -1097,6 +1111,23 @@ class BookingRun {
         break;
       }
       if (result && result.stop) return;
+    }
+    // Screenshot-only calls in a row: the model is hesitating, and every look
+    // burns a paid request. Nudge once, then hand over instead of looping to
+    // the step cap. (Screenshots are deliberately outside the identical-action
+    // repeat tracker — a look is never "the same step" as a click.)
+    const acts = actionsOf(call);
+    if (this.state === "running" && acts.length > 0 && acts.every((x) => x && x.type === "screenshot")) {
+      this.lookStreak += 1;
+      if (this.lookStreak === 2) {
+        this.boost = true;
+        this.notes.push("You've only looked at the page, without clicking, typing or scrolling. Act with the computer tool on what you see, or call ask_user if something is genuinely missing.");
+      } else if (this.lookStreak >= 4) {
+        this.takeover("stuck", "I've looked at the page several times without finding the next step. Glance at the window — say continue and I'll carry on, or take this step yourself.");
+        return;
+      }
+    } else if (this.state === "running") {
+      this.lookStreak = 0;
     }
     if (this.state !== "running") return;
     // Typing into an autocomplete needs a beat for the suggestions to appear.
