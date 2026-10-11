@@ -8,7 +8,9 @@
  */
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import type { ChatCard } from "../types";
-import { askMemory } from "./memoryClient";
+import { askMemory, memoryBridge } from "./memoryClient";
+import { askMemoryRelayed } from "./memoryRelayLive";
+import { isSupabaseConfigured } from "./supabase";
 
 const MEMORY_Q = [
   /\bwhat (did|have) i (read|search(ed)?|look(ed)? (at|up)|see|saw|watch(ed)?|brows(e|ed)|visit(ed)?|google(d)?)\b/i,
@@ -50,6 +52,9 @@ export function takeMemoryCard() {
 }
 
 export async function memoryCardFor(question: string): Promise<Extract<ChatCard, { kind: "memory" }>> {
+  // No local Memory here (the phone, or a browser tab): ask the laptop
+  // through the transient relay. Memory itself never leaves the laptop.
+  if (!memoryBridge() && isSupabaseConfigured) return askMemoryRelayed(question);
   const r = await askMemory(question);
   return { kind: "memory", status: r.status, answer: r.answer, sources: r.sources };
 }

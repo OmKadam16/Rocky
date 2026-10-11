@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const SECRET = "You read the Broad Institute piece on base editing (secret-browsing-detail).";
 const asked = vi.hoisted(() => ({ questions: [] as string[] }));
 vi.mock("./memoryClient", () => ({
+  // The desktop app: local Memory is right here.
+  memoryBridge: () => ({}),
   askMemory: async (q: string) => {
     asked.questions.push(q);
     return { status: "answered", answer: SECRET, sources: [{ title: "Base editing", url: "https://broad.example/x", domain: "broad.example", capturedAt: "2026-10-09T12:00:00.000Z" }] };

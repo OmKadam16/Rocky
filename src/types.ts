@@ -53,7 +53,7 @@ export type MemorySource = { title: string; url: string; domain: string; capture
 /** Rich content rendered inline in the chat (components, not text). */
 export type ChatCard =
   | { kind: "commitment"; proposalId: string; op: "add" | "update" | "delete"; fields: CommitmentFields; conflicts: string[] }
-  | { kind: "memory"; status: "answered" | "none" | "off" | "unavailable"; answer: string; sources: MemorySource[] }
+  | { kind: "memory"; status: "answered" | "none" | "off" | "unavailable"; answer: string; sources: MemorySource[]; /** Phone: answered on the laptop through the relay. */ relayed?: boolean; note?: string }
   | { kind: "receipt"; text: string; undoId: string | null };
 
 export type AssistantTurn = {

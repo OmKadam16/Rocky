@@ -29,6 +29,8 @@ import { isSupabaseConfigured } from "./lib/supabase";
 import { hasLocalAgent } from "./lib/agentClient";
 import { startAgentRelayHost } from "./lib/agentRelay";
 import { isDesktop, syncSecretsOnce } from "./lib/secrets";
+import { askMemory, memoryBridge } from "./lib/memoryClient";
+import { startMemoryRelayHost } from "./lib/memoryRelayLive";
 import { db } from "./lib/db";
 import { toISODate } from "../shared/datetime";
 import type { ChatCard, PageName, ViewName } from "./types";
@@ -118,6 +120,14 @@ export default function App() {
   useEffect(() => {
     if (!isSupabaseConfigured || authLoading || !user || !isDesktop()) return;
     void syncSecretsOnce().catch(() => {});
+  }, [authLoading, user]);
+  // Desktop: answer Memory questions from the paired phone, locally.
+  useEffect(() => {
+    if (!isSupabaseConfigured || authLoading || !user || !memoryBridge()) return;
+    return startMemoryRelayHost(async (q) => {
+      const r = await askMemory(q);
+      return { kind: "memory", status: r.status, answer: r.answer, sources: r.sources };
+    });
   }, [authLoading, user]);
   // Desktop: run booking-agent requests from the paired phone and relay events back.
   useEffect(() => {
