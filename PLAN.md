@@ -417,6 +417,30 @@ Goal: the phone UI as a real Android app (same code, same login, same tabs). No 
 - [ ] Om: create both releases repos, RELEASES_REPO_TOKEN and build secrets, run keytool once,
       add the Supabase redirect URL, publish the first releases, then set UPDATES_ENABLED = true.
 
+### Phase 17: On-phone booking agent
+Goal: bookings work from the Android app with the laptop off, with exactly the desktop's gates.
+- [x] One agent core for both: `shared/agentCore.mjs` (moved from electron/agentCore.cjs, which now
+      re-exports it via require(esm)) and `shared/agentPageScripts.mjs` (the in-page probes and
+      settle timings). Desktop behaviour and tests unchanged (core 53/53, Electron E2E 28/28).
+- [x] `RockyAgentBrowser` (Kotlin): full-screen visible WebView with "Rocky is driving" + Rocky /
+      Stop; own WebView profile (cookie jar), JS on, popups denied, http(s) only, downloads
+      ignored, no file/content access, no JS bridge, permissions denied, Safe Browsing on, no zoom,
+      pages laid out at the WebView's CSS width (screenshot px = page px). open, navigate,
+      screenshot (CSS-px JPEG), pointer (touch, CSS→physical via AgentCoords, unit-tested), key,
+      insertText (key events: a code never goes into a script string), evaluate (read-only
+      probes), history, state, setBanner, show/hide, close.
+- [x] `src/lib/agentAndroid.ts`: the driver + controller in the app's JS, registered as the local
+      agent (agentClient.setLocalAgentBridge), so AgentCard, voice, planner tools, codes and
+      confirmations work as on the laptop. The page steps aside for questions/confirmations and
+      comes back for takeovers; screen kept on only during a run; a run Android killed marks the
+      hold "booking failed - finish by hand" on the next start. APKs without the plugin keep the
+      laptop relay. OpenAI calls go phone → api.openai.com with the shared browser key.
+- [x] Tests: driver/plugin contract + controller (`src/lib/agentAndroid.test.ts`), the fake
+      booking site through a Playwright-backed mock plugin at phone size
+      (`npm run test:agent-android`, 23/23), Kotlin `AgentCoordsTest`; manual list
+      `docs/ANDROID-DEVICE-TESTS.md`.
+- [ ] Om: run the device tests on a real phone (booking with the laptop closed).
+
 ---
 
 ## 6. Do not build
@@ -532,3 +556,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Phase 14 Phone: Chat + Calendar tabs (bottom tab bar, floating mic + reply toast + pending cards on Calendar, full chat with cards and composer, keyboard-aware), phone chat history without private turns, Memory questions from the phone answered on the laptop through one transient relay row (deleted after reading, purged after 2 min), "Allow Memory questions from my phone" toggle. No schema change.
 - 2026-10-11: Phase 15 Android app (Capacitor 8): same web build in the phone UI, mic + spoken replies in the WebView, Keystore-backed session, deep-link email links, back button / resume / offline banner, icons + light/dark splash, debug + signed release builds, CI debug APK. No schema change.
 - 2026-10-11: Phase 16 Auto-update: desktop checks on start and every 6 h (download in background, ask before restart; unsigned NSIS, full downloads) + release-desktop.yml; Android OTA web bundles (SHA-256, rollback, minNativeVersion) + APK update card via the package installer + release-android.yml.
+- 2026-10-11: Phase 17 On-phone booking agent: shared agent core + page probes (desktop unchanged), Kotlin RockyAgentBrowser (hardened visible WebView), the same BookingRun gates running in the Android app, laptop relay kept as the fallback; Android agent E2E through a mocked plugin 23/23.
