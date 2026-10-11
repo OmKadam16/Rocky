@@ -1,3 +1,4 @@
+import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
 import { getSecret } from "./secrets";
 
 /**
@@ -121,11 +122,13 @@ export function startTranscription(
       form.append("model_id", TRANSCRIBE_MODEL);
       form.append("language_code", (navigator.language || "en-US").slice(0, 2));
 
-      const response = await fetch(TRANSCRIBE_URL, {
-        method: "POST",
-        headers: { "xi-api-key": key },
-        body: form,
-      });
+      const response = await withNetRetry(() =>
+        fetch(TRANSCRIBE_URL, {
+          method: "POST",
+          headers: { "xi-api-key": key },
+          body: form,
+        }),
+      );
       if (!response.ok) {
         const detail = await response.text();
         throw new Error(detail.slice(0, 140) || `transcription failed (${response.status})`);
@@ -134,7 +137,8 @@ export function startTranscription(
       const text = (data.text ?? "").trim();
       if (text) handlers.onFinal(text);
     } catch (error) {
-      handlers.onError?.(error instanceof Error ? error.message : String(error));
+      logFailure("voice-to-text", error);
+      handlers.onError?.(isNetworkError(error) ? describeFailure("voice-to-text", error) : error instanceof Error ? error.message : String(error));
     } finally {
       handlers.onEnd?.();
     }

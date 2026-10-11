@@ -11,6 +11,7 @@ import { COMMITMENT_TOOL_NAMES } from "./commitmentTools";
 import { isAgentActive } from "./agentClient";
 import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
 import { calendarGlance } from "./calendarGlance";
+import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
 import type { AssistantTurn } from "../types";
 
 /** The last few turns the cloud planner may see: never private ones. */
@@ -181,7 +182,13 @@ export async function askPlannerLocal(
 
   try {
     const tSnap = Date.now();
-    const snapshot: any = await contextSnapshot();
+    let snapshot: any;
+    try {
+      snapshot = await withNetRetry(() => contextSnapshot());
+    } catch (error) {
+      logFailure("calendar", error);
+      return { reply: describeFailure("calendar", error), tools_used: [], schedule_changed: false, timing: stamp() };
+    }
     snapshotMs += Date.now() - tSnap;
     // Preferences ride the snapshot — no second database round-trip.
     const prefs = ((snapshot.prefs as Record<string, unknown> | undefined) ?? null) as Record<string, unknown> | null;
@@ -415,9 +422,10 @@ export async function askPlannerLocal(
       timing: stamp(),
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    logFailure("planner", error);
+    const message = isNetworkError(error) ? describeFailure("planner", error) : `Local AI error: ${error instanceof Error ? error.message : String(error)}`;
     return {
-      reply: `Local AI error: ${message}`,
+      reply: message,
       tools_used: toolsUsed,
       schedule_changed: toolsUsed.some((t) => MUTATING_TOOLS.has(t.name)),
       timing: stamp(),

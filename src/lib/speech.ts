@@ -1,3 +1,4 @@
+import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
 import { getSecret } from "./secrets";
 import { db } from "./db";
 import { startTranscription } from "./transcribe";
@@ -381,12 +382,16 @@ async function playStreamViaMediaSource(body: ReadableStream<Uint8Array>, contro
 }
 
 function fetchTts(chunk: string, key: string, voiceId: string, controller: AbortController): Promise<Response> {
-  return fetch(ttsStreamUrl(voiceId), {
-    method: "POST",
-    headers: { "xi-api-key": key, "Content-Type": "application/json" },
-    body: JSON.stringify({ text: chunk, model_id: TTS_MODEL }),
-    signal: controller.signal,
-  });
+  return withNetRetry(
+    () =>
+      fetch(ttsStreamUrl(voiceId), {
+        method: "POST",
+        headers: { "xi-api-key": key, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: chunk, model_id: TTS_MODEL }),
+        signal: controller.signal,
+      }),
+    { signal: controller.signal },
+  );
 }
 
 async function speakOneChunk(chunk: string, key: string, voiceId: string, controller: AbortController, prefetched?: Promise<Response>): Promise<void> {
@@ -475,6 +480,8 @@ export async function speak(text: string, opts?: { signal?: AbortSignal }): Prom
     if ((error as DOMException)?.name === "AbortError") return;
     if (controller.signal.aborted || opts?.signal?.aborted) return;
     // Never fail silently — the caller shows this in the assistant panel.
+    logFailure("voice reply", error);
+    if (isNetworkError(error)) throw new Error(`${describeFailure("voice reply", error)} The text reply is kept.`);
     throw error instanceof Error ? error : new Error(String(error));
   } finally {
     if (audioAbort === controller) audioAbort = null;

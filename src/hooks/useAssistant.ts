@@ -5,6 +5,7 @@ import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, st
 import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, submitAgentCode, subscribeAgent } from "../lib/agentClient";
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { startThinkingAck, type ThinkingAck } from "../lib/thinkingAck";
+import { describeFailure, logFailure } from "../lib/netErrors";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 import { foldIntoSummary } from "../lib/chatMemory";
@@ -329,9 +330,10 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
             setCaption("");
             return;
           }
-          const message = failure instanceof Error ? failure.message : String(failure);
+          logFailure("planner", failure);
+          const message = describeFailure("planner", failure);
           setError(message);
-          push({ role: "assistant", text: `I couldn't reach the planner — ${message}` });
+          push({ role: "assistant", text: message });
           await endCapture();
           return;
         }

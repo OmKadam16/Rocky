@@ -1,3 +1,4 @@
+import { readErrorLog } from "../lib/netErrors";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { AssistantState, AssistantTurn } from "../types";
@@ -264,6 +265,14 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
             {agent.timing.last && ` · last ${agent.timing.last.totalMs}ms`}
           </div>
         )}
+        {debugOn &&
+          readErrorLog()
+            .slice(-3)
+            .map((e) => (
+              <div key={e.at} className="mt-1 font-mono text-micro leading-[1.5] text-warm">
+                {new Date(e.at).toLocaleTimeString()} {e.service}: {e.message}
+              </div>
+            ))}
       </div>
     </aside>
   );
