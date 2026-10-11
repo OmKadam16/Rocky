@@ -89,6 +89,25 @@ describe("memory store (SQLite FTS5)", () => {
     expect(s.search({ keywords: ["qwen"] })).toEqual([]);
   });
 
+  it("all keywords beat any keyword; #fragments are the same page", () => {
+    const { s } = store();
+    s.ingest({ url: "https://w.example/Genome_editing#Base_editing", title: "Genome editing", text: "Base editing changes one DNA letter." });
+    s.ingest({ url: "https://w.example/Genome_editing", title: "Genome editing", text: "Base editing changes one DNA letter." });
+    s.ingest({ url: "https://w.example/Qwen", title: "Qwen", text: "Qwen base models." });
+    expect(s.stats().count).toBe(2);
+    expect(s.search({ keywords: ["base", "editing"] }).map((h) => h.title)).toEqual(["Genome editing"]);
+    // Stemming: "edited" / "editing" match the indexed "edit".
+    expect(s.search({ keywords: ["edited", "base"] }).map((h) => h.title)).toEqual(["Genome editing"]);
+    expect(s.search({ keywords: ["base", "sourdough"] }).map((h) => h.title).sort()).toEqual(["Genome editing", "Qwen"]); // OR fallback
+  });
+
+  it("drops pages that only mention a keyword in passing", () => {
+    const { s } = store();
+    s.ingest({ url: "https://w.example/genome", title: "Genome editing", text: "Base editing is a form of genome editing. Base editors edit one base. ".repeat(20) });
+    s.ingest({ url: "https://w.example/qwen", title: "Qwen", text: "Qwen base models. ".repeat(40) + " [edit] [edit]" });
+    expect(s.search({ keywords: ["base", "editing"] }).map((h) => h.title)).toEqual(["Genome editing"]);
+  });
+
   it("dedupes the same URL + content within the window", () => {
     const { s } = store();
     const a = s.ingest({ url: "https://a.example/x", title: "X", text: "same" });
@@ -241,6 +260,14 @@ describe("ingest -> search -> answer (fake extension POSTs, fake Ollama)", () =>
     expect(seen[0].messages[1].content).not.toMatch(/Pasta/);
   });
 
+  it("lists a redirected page once", async () => {
+    const { s } = store();
+    s.ingest({ url: "https://en.wikipedia.org/wiki/Base_editing", title: "Genome editing - Wikipedia", text: "Base editing changes one DNA letter." });
+    s.ingest({ url: "https://en.wikipedia.org/wiki/Genome_editing", title: "Genome editing - Wikipedia", text: "Base editing changes one DNA letter. More." });
+    const r = await answerQuestion("what did I read about base editing", { store: s, chat: async () => "Base editing changes one DNA letter.", now: () => NOW });
+    expect(r.sources).toHaveLength(1);
+  });
+
   it("plain one-line messages: off, nothing found, Ollama down, model unsure", async () => {
     const { s } = store();
     s.ingest({ url: "https://qwen.example/blog", title: "Qwen", text: "Qwen notes" });
@@ -249,7 +276,9 @@ describe("ingest -> search -> answer (fake extension POSTs, fake Ollama)", () =>
     const down = await answerQuestion("what did I read about qwen", { store: s, chat: async () => { throw new Error("ECONNREFUSED"); }, now: () => NOW });
     expect(down).toMatchObject({ status: "unavailable", answer: MSG.ollama });
     expect(down.sources).toHaveLength(1);
-    expect((await answerQuestion("what did I read about qwen", { store: s, chat: async () => "I couldn't find that.", now: () => NOW })).status).toBe("none");
+    const unsure = await answerQuestion("what did I read about qwen", { store: s, chat: async () => "I couldn't find that.", now: () => NOW });
+    expect(unsure).toMatchObject({ status: "none", answer: MSG.partial });
+    expect(unsure.sources).toHaveLength(1); // the matching page is still shown, nothing invented
     s.setSettings({ enabled: false });
     expect(await answerQuestion("what did I read about qwen", { store: s, now: () => NOW })).toMatchObject({ status: "off", answer: "Memory is off. Turn it on in the Memory page." });
   });

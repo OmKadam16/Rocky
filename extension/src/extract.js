@@ -16,7 +16,7 @@ export function extractPage() {
   }
   const root = q("article") || q("main") || q('[role="main"]') || document.body;
   if (!root) return { skip: "empty" };
-  const SKIP = "script,style,noscript,template,svg,canvas,iframe,form,input,textarea,select,button,nav,header,footer,aside,[contenteditable],[contenteditable=''],[aria-hidden='true'],[hidden]";
+  const SKIP = "script,style,noscript,template,svg,canvas,iframe,form,input,textarea,select,button,nav,header,footer,aside,[contenteditable],[contenteditable=''],[aria-hidden='true'],[hidden],.mw-editsection,sup.reference,.noprint,[role='navigation']";
   const BLOCK = /^(P|LI|H[1-6]|DIV|SECTION|ARTICLE|TR|BLOCKQUOTE|PRE|DD|DT|FIGCAPTION|BR)$/;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(n) {

@@ -13,6 +13,7 @@ const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
 const MSG = {
   off: "Memory is off. Turn it on in the Memory page.",
   none: "I couldn't find that in your Memory.",
+  partial: "I couldn't pull a clear answer out, but these pages you visited mention it.",
   noTopic: "I couldn't find that. Tell me the topic or the site, and roughly when.",
   ollama: "Ollama isn't running, so I can't write an answer. Start Ollama, then ask again. The closest pages are below.",
 };
@@ -44,7 +45,19 @@ const KEYWORDS_SCHEMA = {
 
 const day = (ms) => new Date(ms).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
-const toSources = (hits) => hits.map((h) => ({ title: h.title || h.url, url: h.url, domain: h.domain, capturedAt: new Date(h.capturedAt).toISOString() }));
+/** One source per page: redirects and #fragments can save the same article twice. */
+const toSources = (hits) => {
+  const seen = new Set();
+  return hits
+    .filter((h) => {
+      // Same address, or the same titled page on the same site (a redirect).
+      const keys = [String(h.url).replace(/#.*$/, ""), h.title ? `${h.domain}|${h.title}` : null].filter(Boolean);
+      if (keys.some((k) => seen.has(k))) return false;
+      keys.forEach((k) => seen.add(k));
+      return true;
+    })
+    .map((h) => ({ title: h.title || h.url, url: h.url, domain: h.domain, capturedAt: new Date(h.capturedAt).toISOString() }));
+};
 
 /**
  * deps: { store, chat?: (req) => Promise<string>, now?: () => Date }
@@ -116,7 +129,9 @@ async function answerQuestion(question, deps) {
   } catch {
     return { status: "unavailable", answer: MSG.ollama, sources: toSources(top) };
   }
-  if (!answer || /couldn'?t find that/i.test(answer)) return { status: "none", answer: MSG.none, sources: [] };
+  // The model couldn't pull an answer out, but pages did match: say so
+  // honestly and show them, rather than a bare "couldn't find".
+  if (!answer || /couldn'?t find that/i.test(answer)) return { status: "none", answer: MSG.partial, sources: toSources(top) };
   return { status: "answered", answer, sources: toSources(top) };
 }
 

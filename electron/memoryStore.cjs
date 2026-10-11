@@ -123,7 +123,9 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
 
   function ingest(item) {
     const s = settings();
-    const url = String(item && item.url ? item.url : "").slice(0, 2000);
+    // The #fragment is the same page (redirects like /Base_editing ->
+    // /Genome_editing#Base_editing must not save it twice).
+    const url = String(item && item.url ? item.url : "").replace(/#.*$/, "").slice(0, 2000);
     if (!/^https?:\/\//i.test(url)) return { ok: false, reason: "bad_url" };
     if (isExcluded(url, s.excluded)) return { ok: false, reason: "excluded" };
     const title = String(item.title ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
@@ -190,14 +192,17 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
   }
 
   // ---- read --------------------------------------------------------------
-  const ftsQuery = (words) =>
+  const ftsWords = (words) =>
     words
       .map((w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim())
       .filter(Boolean)
       .flatMap((w) => w.split(" "))
-      .filter((w) => w.length > 1)
-      .map((w) => `"${w}"*`)
-      .join(" OR ");
+      .filter((w) => w.length > 1);
+  const ftsQuery = (words, op = "OR") =>
+    ftsWords(words)
+      // Plain term = porter-stemmed ("editing" -> "edit"); prefix catches partial words.
+      .map((w) => `("${w}" OR "${w}"*)`)
+      .join(` ${op} `);
 
   /**
    * Keyword / BM25 search with date + domain filters and a recency boost.
@@ -221,15 +226,23 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
     const q = ftsQuery(keywords);
     let rows;
     if (q) {
-      rows = db
-        .prepare(
-          `SELECT p.id, p.url, p.title, p.domain, p.captured_at, bm25(pages_fts, 4.0, 1.0) AS rank,
-                  snippet(pages_fts, 1, '', '', ' … ', 40) AS snip
-           FROM pages_fts JOIN pages p ON p.id = pages_fts.rowid
-           WHERE pages_fts MATCH ? ${where.length ? `AND ${where.join(" AND ")}` : ""}
-           ORDER BY rank LIMIT 60`,
-        )
-        .all(q, ...params);
+      const run = (match) =>
+        db
+          .prepare(
+            `SELECT p.id, p.url, p.title, p.domain, p.captured_at, bm25(pages_fts, 4.0, 1.0) AS rank,
+                    snippet(pages_fts, 1, '', '', ' … ', 64) AS snip
+             FROM pages_fts JOIN pages p ON p.id = pages_fts.rowid
+             WHERE pages_fts MATCH ? ${where.length ? `AND ${where.join(" AND ")}` : ""}
+             ORDER BY rank LIMIT 60`,
+          )
+          .all(match, ...params);
+      // Narrowest match first: the words as a phrase ("base editing"), then
+      // every word, then any word. BM25 alone can't separate pages in a small
+      // collection where common words appear everywhere (Wikipedia "[edit]").
+      const words = ftsWords(keywords);
+      rows = words.length > 1 ? run(`"${words.join(" ")}"`) : [];
+      if (!rows.length) rows = run(ftsQuery(keywords, "AND"));
+      if (!rows.length) rows = run(q);
     } else {
       rows = db
         .prepare(
