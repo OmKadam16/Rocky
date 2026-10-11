@@ -38,7 +38,7 @@ const TICK_MS = 500;
 const MS_PER_CHAR = 65;
 
 /** Events that mean a real voice line is coming, or the run stopped. */
-const REAL = new Set(["question", "needs_confirmation", "needs_user_takeover", "done", "failed", "cancelled"]);
+const REAL = new Set(["question", "code_request", "needs_confirmation", "needs_user_takeover", "done", "failed", "cancelled"]);
 
 /** What the agent is doing, read off its status line or step log. */
 export function activityFor(e: AgentEvent): Exclude<Activity, "slow"> | null {

@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld("rocky", {
     /** Pre-open the start page during the read-back. Never acts on it. */
     prepare: (task) => ipcRenderer.invoke("agent:prepare", task),
     answer: (text) => ipcRenderer.invoke("agent:answer", text),
+    /** A one-time booking code: goes straight to the run (main process). */
+    code: (text) => ipcRenderer.invoke("agent:code", text),
     confirm: (yes) => ipcRenderer.invoke("agent:confirm", yes === true),
     continue: () => ipcRenderer.invoke("agent:continue"),
     cancel: () => ipcRenderer.invoke("agent:cancel"),

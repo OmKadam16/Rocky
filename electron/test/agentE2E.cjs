@@ -23,6 +23,22 @@ const { createAgentController } = require("../agentWindow.cjs");
 const FIXTURE = path.join(__dirname, "fixtures", "booking-site", "index.html");
 const bookings = [];
 let pageLoads = 0;
+const verifyPosts = [];
+const VERIFY_PAGE = `<!doctype html><meta charset=utf-8><title>Confirm your booking</title>
+<style>body{font:16px system-ui;margin:40px} .box{width:40px;height:48px;font-size:24px;text-align:center;margin-right:6px} #step2{display:none}</style>
+<h1>Confirm your booking</h1>
+<div id=step1><label>Mobile number <input id=phone type=tel name=phone></label> <button id=send>Text me a code</button></div>
+<div id=step2><p>We texted a 6-digit code to •••• 3210 to confirm your booking.</p>
+<form id=f onsubmit="return false"><div id=boxes></div><button id=verify type=button>Verify</button></form><p id=msg></p></div>
+<script>
+const boxes = document.getElementById("boxes");
+for (let i = 0; i < 6; i++) { const b = document.createElement("input"); b.className = "box"; b.maxLength = 1; b.inputMode = "numeric"; if (i === 0) b.autocomplete = "one-time-code"; b.addEventListener("input", () => { if (b.value && b.nextElementSibling) b.nextElementSibling.focus(); }); boxes.appendChild(b); }
+document.getElementById("send").onclick = () => { document.getElementById("step1").style.display = "none"; document.getElementById("step2").style.display = "block"; };
+document.getElementById("verify").onclick = () => {
+  const code = Array.from(document.querySelectorAll(".box")).map((b) => b.value).join("");
+  fetch("/api/verify", { method: "POST", body: code }).then(() => { document.getElementById("msg").textContent = code === "427199" ? "Phone verified. Your booking is confirmed." : "That code is wrong. Try again."; });
+};
+</script>`;
 
 function serve() {
   return new Promise((resolve) => {
@@ -36,6 +52,20 @@ function serve() {
           res.end(JSON.stringify({ ref: "RK-20481" }));
         });
         return;
+      }
+      if (req.method === "POST" && req.url === "/api/verify") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          verifyPosts.push(body);
+          res.writeHead(200);
+          res.end("{}");
+        });
+        return;
+      }
+      if (req.url === "/verify") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end(VERIFY_PAGE);
       }
       if (req.url === "/") pageLoads += 1;
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -204,6 +234,54 @@ async function main() {
   check(take.reason === "captcha" && /say continue/i.test(take.message), "visible CAPTCHA hands over to the user");
   check(!events.some((e) => e.type === "needs_user_takeover" && e !== take), "invisible reCAPTCHA on the booking page did not trigger a takeover");
   capController.cancel();
+
+  // Booking-contact verification code: the site texts a code to the phone
+  // typed for this booking; Rocky asks the user and types it itself into
+  // six one-digit boxes, masked. A wrong code is asked once more.
+  const CODE = "427199";
+  const otpEvents = [];
+  const otpBodies = [];
+  const otpScript = [
+    async ({ site }) => cc(click(await at(site, "#phone")), { type: "type", text: "+91 98765 43210" }, click(await at(site, "#send"))),
+    async () => fc("request_verification_code", { channel: "sms", reason: "confirm the phone number for this booking", field_x: -1, field_y: -1 }),
+    async () => cc({ type: "screenshot" }),
+    async ({ site }) => cc(click(await at(site, "#verify"))),
+    // The page says the code was wrong: ask again.
+    async () => fc("request_verification_code", { channel: "sms", reason: "the code was wrong, confirm the phone number again", field_x: -1, field_y: -1 }),
+    async () => cc({ type: "screenshot" }),
+    async ({ site }) => cc(click(await at(site, "#verify"))),
+    async () => fc("give_up", { reason: "end of the code test" }),
+  ];
+  let otpWaiter = null;
+  const otpController = createAgentController(
+    { getKey: () => null, parent: () => null, broadcast: (e) => { otpEvents.push(e); if (otpWaiter && otpWaiter.type === e.type) { const w = otpWaiter; otpWaiter = null; w.resolve(e); } } },
+    { callModel: async (body, { site }) => { otpBodies.push(body); return otpScript.shift()({ site, body }); } },
+  );
+  const otpNext = (type) => new Promise((resolve, reject) => { otpWaiter = { type, resolve }; setTimeout(() => reject(new Error(`timeout waiting for ${type}`)), 20000); });
+  let req = otpNext("code_request");
+  await otpController.start({ type: "appointment", venue: "Fade Co", phone: "+91 98765 43210", startUrl: url + "verify" });
+  const first = await req;
+  check(first.channel === "sms" && first.attempt === 0, "booking code page: the run paused for the code (no takeover)");
+  const otpSite = otpController.site().webContents;
+  const boxValues = () => otpSite.executeJavaScript(`Array.from(document.querySelectorAll(".box")).map((b) => b.value).join("")`);
+  const boxMasked = () => otpSite.executeJavaScript(`getComputedStyle(document.querySelector(".box")).webkitTextSecurity`);
+  req = otpNext("code_request");
+  const wrong = await otpController.submitCode("one one one one one one");
+  const second = await req;
+  check(wrong.ok && verifyPosts[0] === "111111", "a wrong code was typed and sent by the site");
+  check(second.attempt === 1, "wrong code: asked once more");
+  req = otpNext("failed");
+  const right = await otpController.submitCode("four two seven one double nine");
+  await req;
+  console.log("    debug:", right, verifyPosts, await boxValues());
+  check(right.ok && verifyPosts[1] === CODE && (await boxValues()) === CODE, "spoken digits normalized and typed one per box");
+  check((await boxMasked()) === "disc", "code boxes are masked on screen (and in screenshots)");
+  const pageMsg = await otpSite.executeJavaScript(`document.getElementById("msg").textContent`);
+  check(/verified/i.test(pageMsg), "the site accepted the code");
+  check(!JSON.stringify(otpEvents).includes(CODE) && !JSON.stringify(otpEvents).includes("111111"), "the code is in no agent event");
+  check(!JSON.stringify(otpBodies).includes(CODE), "the code is in no model request");
+  check(!JSON.stringify(otpController.state()).includes(CODE), "the code is not in the run state / step log");
+  otpController.cancel();
 
   server.close();
   const failed = checks.filter((c) => !c.ok);

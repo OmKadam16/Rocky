@@ -41,6 +41,9 @@ export function sanitizeForRelay(e: AgentEvent): AgentEvent | null {
       return { type: "progress", text: clip(e.text, 80) };
     case "question":
       return { type: "question", question: clip(e.question, 300), field: clip(e.field, 60) };
+    case "code_request":
+      // Only where it was sent. The code itself never touches the relay.
+      return { type: "code_request", channel: e.channel === "email" ? "email" : "sms", attempt: Math.max(0, Math.min(9, Number(e.attempt) || 0)) };
     case "needs_confirmation":
       return { type: "needs_confirmation", kind: e.kind, summary: clip(e.summary, 400), screenshot: null };
     case "needs_user_takeover":

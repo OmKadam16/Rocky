@@ -42,6 +42,8 @@ export type AgentEvent =
   | { type: "progress"; text: string; at?: number }
   | { type: "step"; n: number; text: string; blocked?: boolean; at?: number }
   | { type: "question"; question: string; field: string; at?: number }
+  /** The site sent a one-time code to this booking's phone/email. Never carries the code. */
+  | { type: "code_request"; channel: "sms" | "email"; attempt: number; at?: number }
   | { type: "needs_confirmation"; kind: "final" | "safety"; summary: string; screenshot: string | null; at?: number }
   | { type: "needs_user_takeover"; reason: string; message: string; url?: string; at?: number }
   | {
@@ -60,12 +62,14 @@ export type AgentEvent =
   | { type: "failed"; reason: string; url?: string; lastStep?: string; holdBlockId: string | null; timing?: AgentTimingSummary; at?: number }
   | { type: "cancelled"; message: string; holdBlockId: string | null; timing?: AgentTimingSummary; at?: number };
 
-export type AgentPhase = "idle" | "starting" | "running" | "question" | "confirm" | "takeover" | "done" | "failed" | "cancelled";
+export type AgentPhase = "idle" | "starting" | "running" | "question" | "code" | "confirm" | "takeover" | "done" | "failed" | "cancelled";
 
 export type AgentView = {
   phase: AgentPhase;
   /** Short status line: "Opening page", "Filling form", "Waiting for your answer"… */
   status: string;
+  /** Where the site sent a one-time code (phase "code"). Never the code itself. */
+  codeChannel: "sms" | "email" | null;
   question: string | null;
   field: string | null;
   summary: string | null;
@@ -92,6 +96,7 @@ export type AgentView = {
 const IDLE: AgentView = {
   phase: "idle",
   status: "",
+  codeChannel: null,
   question: null,
   field: null,
   summary: null,
@@ -118,13 +123,18 @@ export type AgentBackend = {
   confirm: (yes: boolean) => Promise<boolean>;
   continue: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
+  /** Local only: the relay never carries a code (see submitAgentCode). */
+  code?: (text: string) => Promise<CodeResult>;
 };
+
+export type CodeResult = { ok: boolean; error?: "format" | "handoff" | "not_waiting" | "no_field" | "laptop_only" };
 
 type DesktopAgentBridge = {
   available: () => Promise<boolean>;
   start: (task: AgentTask) => Promise<{ ok?: boolean; error?: string }>;
   prepare?: (task: AgentTask) => Promise<unknown>;
   answer: (text: string) => Promise<boolean>;
+  code: (text: string) => Promise<CodeResult>;
   confirm: (yes: boolean) => Promise<boolean>;
   continue: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
@@ -181,6 +191,7 @@ export function backend(): AgentBackend | null {
       },
       prepare: async (t) => d.prepare?.(t),
       answer: (t) => d.answer(t),
+      code: (t) => d.code(t),
       confirm: (y) => d.confirm(y),
       continue: () => d.continue(),
       cancel: () => d.cancel(),
@@ -192,13 +203,17 @@ export function backend(): AgentBackend | null {
 export const agentAvailable = () => backend() != null;
 /** True on the desktop app, where the agent window itself lives. */
 export const hasLocalAgent = () => desktop() != null;
-export const isAgentActive = () => ["starting", "running", "question", "confirm", "takeover"].includes(view.phase);
+export const isAgentActive = () => ["starting", "running", "question", "code", "confirm", "takeover"].includes(view.phase);
 
 /** Spoken + shown words for an event. Built in code, never by the planner. */
 export function announceFor(e: AgentEvent): string | null {
   switch (e.type) {
     case "question":
       return e.question;
+    case "code_request":
+      return e.attempt > 0
+        ? "That code didn't work. If the site sent a new one, what is it?"
+        : `The site just sent a code to your ${e.channel === "email" ? "email" : "phone"}. What is it?`;
     case "needs_confirmation":
       return e.kind === "final"
         ? `Ready to book: ${e.summary.replace(/[.\s]+$/, "")}. Say yes to book it, or no to stop.`
@@ -222,7 +237,7 @@ export function announceFor(e: AgentEvent): string | null {
 export function reduceAgentEvent(v: AgentView, e: AgentEvent): AgentView {
   const announce = announceFor(e);
   const bump = announce ? { announce, seq: v.seq + 1 } : {};
-  const clearPause = { question: null, field: null, summary: null, confirmKind: null, message: null };
+  const clearPause = { question: null, field: null, summary: null, confirmKind: null, message: null, codeChannel: null };
   switch (e.type) {
     case "status":
       return { ...v, status: e.text, phase: e.state === "running" ? "running" : v.phase };
@@ -236,6 +251,8 @@ export function reduceAgentEvent(v: AgentView, e: AgentEvent): AgentView {
       return { ...v, log: [...v.log, { text: e.text, blocked: Boolean(e.blocked) }].slice(-60) };
     case "question":
       return { ...v, ...clearPause, ...bump, phase: "question", question: e.question, field: e.field, status: "Waiting for your answer" };
+    case "code_request":
+      return { ...v, ...clearPause, ...bump, phase: "code", question: announce, codeChannel: e.channel, status: "Waiting for the code" };
     case "needs_confirmation":
       return { ...v, ...clearPause, ...bump, phase: "confirm", summary: e.summary, confirmKind: e.kind, screenshot: e.screenshot, status: "Waiting for your yes" };
     case "needs_user_takeover":
@@ -322,6 +339,7 @@ function ensureWired() {
       const p = s.pause;
       const base: Partial<AgentView> = { log: s.log ?? [] };
       if (p?.kind === "question") set({ ...base, phase: "question", question: p.question, field: p.field, status: "Waiting for your answer" });
+      else if (p?.kind === "code") set({ ...base, phase: "code", codeChannel: p.channel === "email" ? "email" : "sms", question: announceFor({ type: "code_request", channel: p.channel === "email" ? "email" : "sms", attempt: Number(p.attempt) || 0 }), status: "Waiting for the code" });
       else if (p?.kind === "confirm") set({ ...base, phase: "confirm", summary: p.summary, confirmKind: (p.confirmKind as "final") ?? "final", status: "Waiting for your yes" });
       else if (p?.kind === "takeover") set({ ...base, phase: "takeover", message: p.message, status: "Needs you in the browser window" });
       else set({ ...base, phase: "running", status: "Working" });
@@ -368,6 +386,20 @@ export async function answerAgent(text: string): Promise<boolean> {
   const ok = await b.answer(text).catch(() => false);
   if (ok) set({ phase: "running", status: "Filling form", question: null, field: null });
   return ok;
+}
+
+/**
+ * The user's answer while the site's code is pending. Goes straight to the
+ * run in the main process: never to the planner, never through the phone
+ * relay (that's Supabase), never stored. The run validates and types it.
+ */
+export async function submitAgentCode(text: string): Promise<CodeResult> {
+  const b = backend();
+  if (!b || view.phase !== "code") return { ok: false, error: "not_waiting" };
+  if (b.kind !== "local" || !b.code) return { ok: false, error: "laptop_only" };
+  const r = await b.code(text).catch(() => ({ ok: false, error: "not_waiting" as const }));
+  if (r.ok) set({ phase: "running", status: "Entering the code", question: null, codeChannel: null });
+  return r;
 }
 
 export async function confirmAgent(yes: boolean): Promise<boolean> {

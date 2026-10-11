@@ -16,6 +16,8 @@ const {
   toInputSteps,
   scaleFor,
   describeAction,
+  normalizeCode,
+  classifyCodeRequest,
 } = core;
 
 const TASK = {
@@ -519,6 +521,7 @@ describe("task + tools", () => {
       "request_final_confirmation",
       "report_booked",
       "handoff_to_user",
+      "request_verification_code",
       "open_url",
       "give_up",
     ]);
@@ -586,5 +589,214 @@ describe("speed settings", () => {
     await h.run.start();
     await h.run.current;
     expect(settles[0]).toMatchObject({ afterType: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Verification codes: the narrow booking-contact exception
+// ---------------------------------------------------------------------------
+
+const PHONE_FIELD = { tag: "input", type: "tel", name: "phone", label: "Phone" };
+const CODE = "4271";
+const BOOKING_CODE_PAGE = {
+  url: "https://booking.example.test/verify",
+  title: "Verify your phone",
+  text: "We texted a 4-digit code to •••• 3210 to confirm your booking. Enter it below. Resend code",
+  hasPassword: false,
+  count: 4,
+  split: true,
+};
+
+function codeHarness({ ctx = BOOKING_CODE_PAGE, fill = { ok: true, masked: true }, script, limits } = {}) {
+  const h = harness({ focus: PHONE_FIELD, script, limits });
+  const fills = [];
+  h.deps.codeContext = async () => ctx;
+  h.deps.fillCode = async (code, point) => {
+    fills.push({ code, point });
+    return typeof fill === "function" ? fill(code) : fill;
+  };
+  return { ...h, fills };
+}
+const requestCode = (channel = "sms") =>
+  fc("request_verification_code", { channel, reason: "confirm the phone number for this booking", field_x: 640, field_y: 400 });
+
+describe("verification code: digits", () => {
+  it("normalizes spoken and typed digits to 4-8 digits", () => {
+    expect(normalizeCode("four two seven one")).toBe("4271");
+    expect(normalizeCode("42 71")).toBe("4271");
+    expect(normalizeCode("4-2-7-1")).toBe("4271");
+    expect(normalizeCode("It's 4 2 7 1.")).toBe("4271");
+    expect(normalizeCode("double four seven one")).toBe("4471");
+    expect(normalizeCode("forty two seventy one")).toBe("4271");
+    expect(normalizeCode("oh one two three")).toBe("0123");
+    expect(normalizeCode("the code is 991203")).toBe("991203");
+    expect(normalizeCode("4271 please")).toBe("4271");
+    expect(normalizeCode("123")).toBe(null); // too short
+    expect(normalizeCode("123456789")).toBe(null); // too long
+    expect(normalizeCode("outdoor seating")).toBe(null);
+    expect(normalizeCode("4271 and my card is 4111")).toBe(null);
+  });
+});
+
+describe("verification code: booking contact vs account login (decided in code)", () => {
+  const task = normalizeTask(TASK);
+  const typed = { phoneTyped: true, emailTyped: true };
+
+  it("accepts a code sent to the phone/email typed for this booking", () => {
+    expect(classifyCodeRequest({ ...BOOKING_CODE_PAGE, ...typed, channel: "sms" }, task).ok).toBe(true);
+    expect(
+      classifyCodeRequest(
+        { url: "https://book.example.test/c", text: "We emailed a code to om@example.com to confirm your reservation.", channel: "email", ...typed },
+        task,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("hands over sign-in 2FA, other contacts, password forms and unsure pages", () => {
+    const no = (ctx) => expect(classifyCodeRequest({ ...BOOKING_CODE_PAGE, ...typed, channel: "sms", ...ctx }, task).ok).toBe(false);
+    no({ url: "https://accounts.google.com/signin/v2/challenge" });
+    no({ url: "https://booking.example.test/login/verify" });
+    no({ text: "2-Step Verification. Enter the code from your authenticator app." });
+    no({ text: "Enter the code we sent to •••• 3210 to sign in to your account." });
+    no({ text: "Use a backup code" });
+    no({ reason: "two-factor code to log in" });
+    no({ hasPassword: true });
+    no({ text: "We texted a code to •••• 9999 to confirm your booking." }); // not the user's number
+    no({ phoneTyped: false }); // the user's phone was never typed in this run
+    no({ text: "Enter code", title: "", url: "https://booking.example.test/x" }); // nothing ties it to this booking
+  });
+});
+
+describe("verification code: the run", () => {
+  it("pauses on request_verification_code, types the code itself, and the code goes nowhere else", async () => {
+    const h = codeHarness({
+      script: [cc(click(100, 100), type("+91 98765 43210")), requestCode(), cc({ type: "screenshot" }), fc("give_up", { reason: "test end" })],
+    });
+    await h.run.start();
+    await h.run.current;
+    expect(h.run.state).toBe("waiting_code");
+    expect(h.ofType("code_request")[0]).toEqual(expect.objectContaining({ type: "code_request", channel: "sms", attempt: 0 }));
+    // Answering it like an ordinary question does nothing.
+    expect(h.run.answer(CODE)).toBe(false);
+    expect(await h.run.submitCode("four two seven one")).toEqual({ ok: true });
+    await h.run.current;
+    expect(h.fills).toEqual([{ code: CODE, point: { x: 640, y: 400 } }]);
+    // Never in events, the step log, model requests, or the run's own state.
+    expect(JSON.stringify(h.events)).not.toContain(CODE);
+    expect(JSON.stringify(h.bodies)).not.toContain(CODE);
+    expect(JSON.stringify(h.run, (k, v) => (k === "deps" ? undefined : v))).not.toContain(CODE);
+    expect(h.ofType("step").map((e) => e.text)).toContain("typed the verification code");
+    const out = h.bodies[2].input.find((x) => x.type === "function_call_output");
+    expect(JSON.parse(out.output).status).toBe("entered");
+  });
+
+  it("a non-code answer re-asks without typing; three misses hand over", async () => {
+    const h = codeHarness({ script: [cc(click(100, 100), type("+91 98765 43210")), requestCode()] });
+    await h.run.start();
+    await h.run.current;
+    expect(await h.run.submitCode("indoor please")).toEqual({ ok: false, error: "format" });
+    expect(await h.run.submitCode("12")).toEqual({ ok: false, error: "format" });
+    expect(h.run.state).toBe("waiting_code");
+    expect(await h.run.submitCode("not sure")).toEqual({ ok: false, error: "handoff" });
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.fills).toHaveLength(0);
+  });
+
+  it("wrong code: asks once more; after 3 typed codes the user takes over", async () => {
+    const h = codeHarness({
+      script: [
+        cc(click(100, 100), type("+91 98765 43210")),
+        requestCode(),
+        requestCode(), // the page said the code was wrong
+        requestCode(), // expired
+        requestCode(), // over the limit
+      ],
+    });
+    await h.run.start();
+    await h.run.current;
+    for (const attempt of [0, 1, 2]) {
+      expect(h.run.state).toBe("waiting_code");
+      expect(h.ofType("code_request")[attempt].attempt).toBe(attempt);
+      await h.run.submitCode(`1 2 3 ${attempt}`);
+      await h.run.current;
+    }
+    expect(h.fills).toHaveLength(3);
+    expect(h.run.state).toBe("waiting_takeover");
+    const last = h.ofType("needs_user_takeover").at(-1);
+    expect(last.reason).toBe("two_factor");
+    expect(last.message).toMatch(/after 3 tries/);
+  });
+
+  it("login 2FA is still handed over, never asked for", async () => {
+    const h = codeHarness({
+      ctx: {
+        url: "https://accounts.google.com/v3/signin/challenge/ipp",
+        title: "Sign in",
+        text: "2-Step Verification. A text message with a code was sent to •••• 3210",
+        hasPassword: false,
+      },
+      script: [cc(click(100, 100), type("+91 98765 43210")), requestCode()],
+    });
+    await h.run.start();
+    await h.run.current;
+    expect(h.run.state).toBe("waiting_takeover");
+    expect(h.ofType("code_request")).toHaveLength(0);
+    expect(await h.run.submitCode(CODE)).toEqual({ ok: false, error: "not_waiting" });
+    expect(h.fills).toHaveLength(0);
+  });
+
+  it("the page probe: a booking code page doesn't force a takeover, a login one does", async () => {
+    const ok = codeHarness({ script: [cc(click(100, 100), type("+91 98765 43210")), cc({ type: "screenshot" }), fc("give_up", { reason: "x" })] });
+    ok.page.probe.hasTwoFactor = true;
+    await ok.run.start();
+    await ok.run.current;
+    expect(ok.ofType("needs_user_takeover")).toHaveLength(0);
+    const hint = ok.bodies[1].input.find((x) => x.role === "user");
+    expect(hint.content[0].text).toMatch(/request_verification_code/);
+
+    const login = codeHarness({ ctx: { ...BOOKING_CODE_PAGE, text: "Enter the code to sign in" }, script: [cc(click(100, 100), type("+91 98765 43210"))] });
+    login.page.probe.hasTwoFactor = true;
+    await login.run.start();
+    await login.run.current;
+    expect(login.ofType("needs_user_takeover")[0]).toMatchObject({ reason: "two_factor" });
+  });
+
+  it("an unmasked code skips the evidence screenshot on that page", async () => {
+    const h = codeHarness({
+      ctx: { ...BOOKING_CODE_PAGE, url: TASK.startUrl }, // the same page the probe sees
+      fill: { ok: true, masked: false },
+      script: [
+        cc(click(100, 100), type("+91 98765 43210")),
+        requestCode(),
+        cc({ type: "screenshot" }),
+        fc("request_final_confirmation", { summary: "Testaurant 7pm", costs_money: false, amount: "" }),
+      ],
+    });
+    await h.run.start();
+    await h.run.current;
+    await h.run.submitCode(CODE);
+    await h.run.current;
+    expect(h.run.state).toBe("waiting_confirm");
+    expect(h.ofType("needs_confirmation")[0].screenshot).toBe(null);
+  });
+
+  it("no code field found: hand over instead of guessing", async () => {
+    const h = codeHarness({ fill: { ok: false }, script: [cc(click(100, 100), type("+91 98765 43210")), requestCode()] });
+    await h.run.start();
+    await h.run.current;
+    expect(await h.run.submitCode(CODE)).toEqual({ ok: false, error: "no_field" });
+    expect(h.run.state).toBe("waiting_takeover");
+  });
+
+  it("ask_user can't be used for codes, and the prompt states only the narrow exception", async () => {
+    const h = codeHarness({
+      script: [fc("ask_user", { question: "What's the verification code?", field: "code", optional: false }), fc("give_up", { reason: "x" })],
+    });
+    await h.run.start();
+    await h.run.current;
+    expect(h.ofType("question")).toHaveLength(0);
+    expect(INSTRUCTIONS).toMatch(/request_verification_code/);
+    expect(INSTRUCTIONS).toMatch(/to the phone number or email you typed for THIS booking/);
+    expect(INSTRUCTIONS).toMatch(/signing in to an account .* is not this exception/);
   });
 });

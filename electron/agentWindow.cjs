@@ -134,6 +134,64 @@ const STALE_REQUEST_MS = 1500;
 
 const SHOT_JPEG_QUALITY = 85;
 
+/**
+ * Finds the one-time-code field(s): autocomplete="one-time-code" first, else
+ * inputs labelled code/OTP/verification (never promo/coupon/zip), else a row
+ * of 4-8 one-character boxes. Marks them data-rocky-code="0..n" (so fillCode
+ * can focus them) and returns the text of their form/dialog for the
+ * booking-contact vs sign-in decision. Never reads any value.
+ */
+const CODE_CTX_JS = `(() => {
+  const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 2 && r.height > 2 && s.visibility !== "hidden" && s.display !== "none"; };
+  const skip = new Set(["hidden", "submit", "button", "checkbox", "radio", "password", "email", "file", "image", "reset", "range", "color", "date", "time"]);
+  const inputs = Array.from(document.querySelectorAll("input")).filter((e) => vis(e) && !skip.has((e.getAttribute("type") || "").toLowerCase()));
+  const desc = (e) => [e.name, e.id, e.getAttribute("autocomplete"), e.placeholder, e.getAttribute("aria-label"), e.labels && e.labels[0] ? e.labels[0].innerText : ""].join(" ").toLowerCase();
+  const notCode = /promo|coupon|discount|gift|voucher|zip|postal|post code|country|area code|dial/;
+  let fields = inputs.filter((e) => (e.getAttribute("autocomplete") || "").toLowerCase() === "one-time-code");
+  if (!fields.length) fields = inputs.filter((e) => /otp|one[- ]?time|verification|verify|\\bcode\\b|\\bpin\\b/.test(desc(e)) && !notCode.test(desc(e)));
+  const singles = inputs.filter((e) => e.maxLength === 1);
+  if ((fields.length <= 1 && singles.length >= 4 && singles.length <= 8) && (!fields.length || fields[0].maxLength === 1)) fields = singles;
+  document.querySelectorAll("[data-rocky-code]").forEach((e) => e.removeAttribute("data-rocky-code"));
+  if (!fields.length) return null;
+  fields.forEach((e, i) => e.setAttribute("data-rocky-code", String(i)));
+  let root = fields[0].closest("form,[role=dialog],dialog");
+  if (!root) { root = fields[0]; for (let i = 0; i < 4 && root.parentElement && root.parentElement !== document.body; i += 1) root = root.parentElement; }
+  return {
+    count: fields.length,
+    split: fields.length >= 4 && fields.every((e) => e.maxLength === 1),
+    text: (root.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 1500),
+    hasPassword: !!root.querySelector("input[type=password]"),
+  };
+})()`;
+
+/** Focus code box i and select what's in it (a retry overwrites the old code). */
+const FOCUS_CODE_JS = (i) => `(() => {
+  const e = document.querySelector('[data-rocky-code="${i}"]');
+  if (!e) return false;
+  e.focus();
+  try { e.select(); } catch (err) {}
+  return document.activeElement === e;
+})()`;
+
+/** How many characters the code field(s) hold in total (never the values). */
+const CODE_LEN_JS = `Array.from(document.querySelectorAll("[data-rocky-code]")).reduce((n, e) => n + String(e.value || "").length, 0)`;
+
+/** Characters in code box i (never the value). */
+const BOX_LEN_JS = (i) => `(() => { const e = document.querySelector('[data-rocky-code="${i}"]'); return e ? String(e.value || "").length : -1; })()`;
+
+/** After a click on the model's point: is an input focused? Mark it. */
+const MARK_FOCUSED_JS = `(() => {
+  const e = document.activeElement;
+  if (!e || e.tagName !== "INPUT" || (e.getAttribute("type") || "").toLowerCase() === "password") return false;
+  document.querySelectorAll("[data-rocky-code]").forEach((x) => x.removeAttribute("data-rocky-code"));
+  e.setAttribute("data-rocky-code", "0");
+  try { e.select(); } catch (err) {}
+  return true;
+})()`;
+
+/** Code fields show dots, so screenshots (model and evidence) never show the digits. */
+const MASK_CSS = "[data-rocky-code]{-webkit-text-security:disc !important;}";
+
 const TEXT_JS = `(document.body ? document.body.innerText : "").slice(0, 20000)`;
 
 
@@ -317,6 +375,69 @@ function createAgentController(deps, options = {}) {
     return out;
   }
 
+  /** The code field(s) and their surrounding text (main frame). */
+  async function codeContext() {
+    const wc = siteWc();
+    const ctx = await evalMain(CODE_CTX_JS).catch(() => null);
+    const base = { url: wc.getURL(), title: wc.getTitle() };
+    if (ctx) return { ...base, ...ctx };
+    // No field found in the DOM (e.g. inside a cross-origin frame): judge the
+    // page text, which only ever makes a handoff more likely.
+    const text = String((await evalMain(TEXT_JS).catch(() => "")) || "").slice(0, 1500);
+    return { ...base, text, hasPassword: false, count: 0, split: false };
+  }
+
+  /**
+   * Types the code into the marked field(s): masked first, then one digit per
+   * box (split) or the whole code. The code is only ever an argument to
+   * insertText: never in a script string, a log, or an event.
+   */
+  async function fillCode(code, point) {
+    const wc = siteWc();
+    let masked = false;
+    try {
+      await wc.insertCSS(MASK_CSS);
+      masked = true;
+    } catch {
+      masked = false;
+    }
+    const ctx = await evalMain(CODE_CTX_JS).catch(() => null);
+    if (ctx && ctx.count > 0) {
+      const split = ctx.split && ctx.count >= code.length;
+      const parts = split ? code.split("") : [code];
+      // Focus the page once; re-focusing it per box can restore the old box.
+      wc.focus();
+      for (let i = 0; i < parts.length; i += 1) {
+        if (!(await evalMain(FOCUS_CODE_JS(i)).catch(() => false))) return { ok: false, masked };
+        await wc.insertText(parts[i]);
+        // insertText can resolve before the page has it: wait for this box
+        // to hold it, or the next digit lands in the same box.
+        for (let t = 0; t < 15; t += 1) {
+          if (Number(await evalMain(BOX_LEN_JS(i)).catch(() => -1)) >= parts[i].length) break;
+          await sleep(20);
+        }
+      }
+      // Wait for the page to hold all of it before the model clicks Verify.
+      for (let t = 0; t < 20; t += 1) {
+        if (Number(await evalMain(CODE_LEN_JS).catch(() => -1)) >= code.length) break;
+        await sleep(50);
+      }
+      return { ok: true, masked };
+    }
+    if (!point) return { ok: false, masked };
+    // The model's point: click it, and type only if that focused an input.
+    for (const type of ["mouseMove", "mouseDown", "mouseUp"]) {
+      wc.sendInputEvent(type === "mouseMove" ? { type, x: point.x, y: point.y } : { type, x: point.x, y: point.y, button: "left", clickCount: 1 });
+      await sleep(type === "mouseUp" ? 60 : 15);
+    }
+    // A field inside a frame can't be marked from here: not masked.
+    const marked = await evalMain(MARK_FOCUSED_JS).catch(() => false);
+    if (!marked) return { ok: false, masked: false };
+    wc.focus();
+    await wc.insertText(code);
+    return { ok: true, masked };
+  }
+
   async function pageText() {
     const wc = siteWc();
     const parts = [String((await evalMain(TEXT_JS).catch(() => "")) || "")];
@@ -479,6 +600,9 @@ function createAgentController(deps, options = {}) {
       setBanner("Rocky is driving", e.text);
     } else if (e.type === "status") {
       setBanner(e.state === "running" ? "Rocky is driving" : "Rocky is paused", e.text, e.state !== "running");
+    } else if (e.type === "code_request") {
+      lastPause = { kind: "code", channel: e.channel, attempt: e.attempt };
+      setBanner("Rocky is paused", "Waiting for the code the site sent you", true);
     } else if (e.type === "question") {
       lastPause = { kind: "question", question: e.question, field: e.field };
       setBanner("Rocky is paused", `Waiting for your answer: ${e.question}`, true);
@@ -530,11 +654,14 @@ function createAgentController(deps, options = {}) {
     if (active()) return { error: "A booking is already running. Stop it first." };
     if (!options.callModel && !deps.getKey()) return { error: "No browser key. Add it in Profile → Model." };
     ensureWindow();
+    // A window pre-opened without focus (prepare) comes forward now: an
+    // unfocused page can hold typed text back until the next input event.
+    if (win && !win.isDestroyed() && !win.isFocused()) win.show();
     log = [];
     lastPause = null;
     run = new core.BookingRun(
       task,
-      { callModel, screenshot, navigate: navigateRun, history, input, settle, probe, describePoint, describeFocus, pageText, emit, now: () => Date.now(), sleep },
+      { callModel, screenshot, navigate: navigateRun, history, input, settle, probe, describePoint, describeFocus, pageText, codeContext, fillCode, emit, now: () => Date.now(), sleep },
       { limits: options.limits },
     );
     void run.start();
@@ -545,6 +672,8 @@ function createAgentController(deps, options = {}) {
     start,
     prepare,
     answer: (text) => Boolean(run && run.answer(text)),
+    /** The verification code: straight into the run, never logged. */
+    submitCode: async (text) => (run ? run.submitCode(text) : { ok: false, error: "not_waiting" }),
     confirm: (yes) => Boolean(run && run.confirm(yes === true)),
     continueRun: () => Boolean(run && run.continueRun()),
     cancel: () => Boolean(run && run.cancel()),
@@ -565,6 +694,8 @@ function registerAgentIpc(controller) {
   ipcMain.handle("agent:start", (_e, task) => controller.start(task && typeof task === "object" ? task : {}));
   ipcMain.handle("agent:prepare", (_e, task) => controller.prepare(task && typeof task === "object" ? task : {}));
   ipcMain.handle("agent:answer", (_e, text) => controller.answer(String(text ?? "").slice(0, 500)));
+  // Its own channel so the code never shares a path with ordinary answers.
+  ipcMain.handle("agent:code", (_e, text) => controller.submitCode(String(text ?? "").slice(0, 120)));
   ipcMain.handle("agent:confirm", (_e, yes) => controller.confirm(yes === true));
   ipcMain.handle("agent:continue", () => controller.continueRun());
   ipcMain.handle("agent:cancel", () => controller.cancel());

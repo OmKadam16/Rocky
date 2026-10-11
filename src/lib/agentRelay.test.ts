@@ -47,3 +47,15 @@ describe("progress lines cross to the phone", () => {
     expect(sanitizeForRelay({ type: "timing", step, summary })).toBe(null);
   });
 });
+
+describe("verification codes never cross the relay", () => {
+  it("relays only where the code went, never a code", () => {
+    expect(sanitizeForRelay({ type: "code_request", channel: "sms", attempt: 1 })).toEqual({ type: "code_request", channel: "sms", attempt: 1 });
+    const sneaky = sanitizeForRelay({ type: "code_request", channel: "sms", attempt: 0, code: "4271" } as never);
+    expect(JSON.stringify(sneaky)).not.toContain("4271");
+  });
+
+  it("there is no relay op for a code", () => {
+    expect(parseRequest({ op: "code", text: "4271" })).toBe(null);
+  });
+});

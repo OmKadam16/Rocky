@@ -65,3 +65,15 @@ describe("progress lines in the view", () => {
     expect(paused.status).toBe("Waiting for your answer");
   });
 });
+
+describe("verification code request in the view", () => {
+  it("asks in code-built words, names only the channel", () => {
+    const v = reduceAgentEvent(getAgentView(), { type: "code_request", channel: "sms", attempt: 0 });
+    expect(v.phase).toBe("code");
+    expect(v.announce).toBe("The site just sent a code to your phone. What is it?");
+    expect(v.codeChannel).toBe("sms");
+    const again = reduceAgentEvent(v, { type: "code_request", channel: "sms", attempt: 1 });
+    expect(again.announce).toMatch(/didn't work/);
+    expect(announceFor({ type: "code_request", channel: "email", attempt: 0 })).toMatch(/your email/);
+  });
+});

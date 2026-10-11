@@ -9,11 +9,19 @@ const agent = vi.hoisted(() => ({
   answers: [] as string[],
   confirms: [] as boolean[],
   prepared: [] as unknown[],
+  codes: [] as string[],
+  codeResult: { ok: true } as { ok: boolean; error?: string },
 }));
 vi.mock("./agentClient", () => ({
   agentAvailable: () => agent.available,
   getAgentView: () => ({ phase: agent.phase, question: "Indoor or outdoor?", message: "Solve the CAPTCHA" }),
-  isAgentActive: () => ["running", "question", "confirm", "takeover"].includes(agent.phase),
+  isAgentActive: () => ["running", "question", "code", "confirm", "takeover"].includes(agent.phase),
+  submitAgentCode: async (t: string) => {
+    agent.codes.push(t);
+    return agent.codeResult;
+  },
+  onFillerCancel: () => () => {},
+  setProgressBusy: () => {},
   startAgent: async (t: unknown) => {
     agent.started.push(t);
     return { ok: true };
@@ -34,7 +42,7 @@ vi.mock("./agentClient", () => ({
 }));
 
 import { resetBookingState, runBookingTool, type CalendarHelpers } from "./bookingTools";
-import { agentFastPath } from "../hooks/useAssistant";
+import { agentFastPath, CODE_PLACEHOLDER, routeAgentTurn } from "../hooks/useAssistant";
 
 function calendar(opts: { fixedClash?: boolean } = {}) {
   const blocks: ScheduledBlockRow[] = [];
@@ -81,6 +89,8 @@ beforeEach(() => {
   agent.answers = [];
   agent.confirms = [];
   agent.prepared = [];
+  agent.codes = [];
+  agent.codeResult = { ok: true };
 });
 
 describe("propose_booking: one question at a time, then a hold + full plan", () => {
@@ -223,5 +233,42 @@ describe("voice fast path (confirmation #2 never goes through the planner)", () 
     agent.answers = [];
     expect(await agentFastPath("outdoor please")).toBe("Got it.");
     expect(agent.answers).toEqual(["outdoor please"]);
+  });
+});
+
+describe("verification code turns (never the planner)", () => {
+  it("the user's digits go to the agent's code path, not the question path", async () => {
+    agent.phase = "code";
+    expect(await agentFastPath("four two seven one")).toBe("Got it, entering the code.");
+    expect(agent.codes).toEqual(["four two seven one"]);
+    expect(agent.answers).toEqual([]);
+  });
+
+  it("no turn during a pending code reaches the planner, even a failed or odd one", async () => {
+    agent.phase = "code";
+    for (const [result, text] of [
+      [{ ok: true }, "4271"],
+      [{ ok: false, error: "format" }, "what time is it"],
+      [{ ok: false, error: "laptop_only" }, "4 2 7 1"],
+      [{ ok: false, error: "not_waiting" }, "4271"],
+      [{ ok: false, error: "handoff" }, "no idea"],
+    ] as const) {
+      agent.codeResult = result;
+      const r = await routeAgentTurn(text);
+      expect(r.planner).toBe(false);
+      expect(r.reply ?? "").not.toMatch(/\d{4}/); // our reply never echoes digits
+    }
+    agent.codeResult = { ok: false, error: "laptop_only" };
+    expect(await agentFastPath("4271")).toMatch(/laptop/);
+  });
+
+  it("stop still stops", async () => {
+    agent.phase = "code";
+    expect(await routeAgentTurn("stop")).toEqual({ planner: false, reply: null });
+    expect(agent.codes).toEqual([]);
+  });
+
+  it("the chat and planner history get a placeholder, not the code", () => {
+    expect(CODE_PLACEHOLDER).not.toMatch(/\d/);
   });
 });

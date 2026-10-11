@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantState, AssistantTurn } from "../types";
 import { askPlanner } from "../lib/planner";
 import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, stopSpeaking } from "../lib/speech";
-import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, subscribeAgent } from "../lib/agentClient";
+import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, submitAgentCode, subscribeAgent } from "../lib/agentClient";
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 
@@ -38,6 +38,9 @@ export type SendOpts = {
    */
   speak?: boolean;
 };
+
+/** What the chat shows (and the planner's history holds) instead of a code. */
+export const CODE_PLACEHOLDER = "•••• (verification code)";
 
 let turnId = 0;
 const nextId = () => `turn-${(turnId += 1)}`;
@@ -85,6 +88,28 @@ function isFiller(text: string): boolean {
  */
 export async function agentFastPath(text: string): Promise<string | null> {
   const v = getAgentView();
+  if (v.phase === "code") {
+    // The site's one-time code. It goes straight to the agent and nowhere
+    // else: this branch never returns null for anything but stop, so the
+    // turn can never fall through to the planner.
+    if (isStop(text)) {
+      await cancelAgent();
+      return null;
+    }
+    const r = await submitAgentCode(text);
+    if (r.ok) return "Got it, entering the code.";
+    switch (r.error) {
+      case "format":
+        return "I need the 4 to 8 digit code from the message. What is it?";
+      case "laptop_only":
+        return "Codes don't go through the phone link. Say it to Rocky on your laptop, or type it into the agent window.";
+      case "handoff":
+      case "no_field":
+        return "Please enter the code in the agent window, then say continue.";
+      default:
+        return "That code request has closed.";
+    }
+  }
   if (v.phase === "confirm") {
     if (isExplicitYes(text)) return (await confirmAgent(true)) ? "Booking it now." : "That confirmation already closed.";
     if (isExplicitNo(text) || isStop(text)) {
@@ -116,6 +141,22 @@ export async function agentFastPath(text: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Who takes this turn while the agent runs: the agent (fast path, with an
+ * optional reply of ours) or the planner. A turn that starts while the
+ * site's code is pending never goes to the planner, whatever happens.
+ */
+export async function routeAgentTurn(text: string): Promise<{ planner: boolean; reply: string | null }> {
+  if (!isAgentActive()) return { planner: true, reply: null };
+  const v = getAgentView().phase;
+  const reply = await agentFastPath(text);
+  if (reply) return { planner: false, reply };
+  if (v === "code") return { planner: false, reply: null };
+  // Handled with no reply of our own: the agent's own announcement follows.
+  if (v === "confirm" || (v === "takeover" && (isStop(text) || isExplicitNo(text))) || isStop(text)) return { planner: false, reply: null };
+  return { planner: true, reply: null };
+}
+
 export function useAssistant(onScheduleChange: () => void) {
   const [state, setState] = useState<AssistantState>("idle");
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
@@ -141,25 +182,24 @@ export function useAssistant(onScheduleChange: () => void) {
     async (text: string, opts?: SendOpts) => {
       const speakReply = opts?.speak !== false;
       const tSend = Date.now();
-      push({ role: "user", text });
+      // While the site's code is pending, the code never lands in the chat
+      // (or the planner's history, which is built from these turns).
+      push({ role: "user", text: getAgentView().phase === "code" ? CODE_PLACEHOLDER : text });
       setCaption("");
       setState("thinking");
       setError(null);
 
       try {
-        if (isAgentActive()) {
-          const v = getAgentView().phase;
-          const handled = await agentFastPath(text);
-          if (handled) {
-            push({ role: "assistant", text: handled });
+        const routed = await routeAgentTurn(text);
+        if (!routed.planner) {
+          if (routed.reply) {
+            push({ role: "assistant", text: routed.reply });
             if (speakReply) {
               setState("speaking");
-              await speak(handled).catch(() => {});
+              await speak(routed.reply).catch(() => {});
             }
-            return;
           }
-          // Handled with no reply of our own: the agent's own announcement follows.
-          if (v === "confirm" || (v === "takeover" && (isStop(text) || isExplicitNo(text))) || isStop(text)) return;
+          return;
         }
         let response;
         try {

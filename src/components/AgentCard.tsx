@@ -9,7 +9,7 @@ type Props = {
   compact?: boolean;
 };
 
-const ACTIVE = new Set(["starting", "running", "question", "confirm", "takeover"]);
+const ACTIVE = new Set(["starting", "running", "question", "code", "confirm", "takeover"]);
 
 /**
  * The booking agent's live card: status, the question it's waiting on, the
@@ -21,7 +21,7 @@ export default function AgentCard({ agent, onSend, compact }: Props) {
   if (agent.phase === "idle") return null;
   const active = ACTIVE.has(agent.phase);
   const body =
-    agent.phase === "question"
+    agent.phase === "question" || agent.phase === "code"
       ? agent.question
       : agent.phase === "confirm"
         ? agent.summary
@@ -48,6 +48,13 @@ export default function AgentCard({ agent, onSend, compact }: Props) {
       {body && <div className="mt-[8px] text-body leading-[1.45] text-ink [text-wrap:pretty]">{body}</div>}
       {agent.phase === "question" && (
         <div className="mt-[6px] font-mono text-micro text-grey-mid">Answer by voice or type it below.</div>
+      )}
+      {agent.phase === "code" && (
+        <div className="mt-[6px] font-mono text-micro text-grey-mid">
+          {compact
+            ? "Codes stay on your laptop: say it to Rocky there, or type it into the agent window."
+            : "Say the digits or type them below. Rocky types the code in for you and never saves it."}
+        </div>
       )}
       {agent.phase === "takeover" && (
         <div className="mt-[6px] font-mono text-micro text-grey-mid">Do it in the agent window, then tap Continue or say “continue”.</div>
