@@ -14,7 +14,8 @@
     "install:app": "npm run build:mac && scripts/install-local.sh",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "test:agent-e2e": "electron electron/test/agentE2E.cjs"
+    "test:agent-e2e": "electron electron/test/agentE2E.cjs",
+    "build:win": "npm run build:electron && electron-builder --win --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
@@ -81,6 +82,25 @@
         "owner": "OmKadam16",
         "repo": "rocky-releases"
       }
-    ]
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rocky"
+    },
+    "electronDist": "node_modules/electron/dist"
   }
 }

@@ -461,6 +461,20 @@ function registerUpdates() {
   });
 }
 
+// One Rocky at a time: a second copy would run a second booking agent and
+// answer the phone's relay requests twice. A second launch focuses the first.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
   registerAppProtocol();
   registerSecretHandlers();
