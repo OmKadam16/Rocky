@@ -23,6 +23,7 @@ import {
 import type { FixedCommitmentRow, PreferencesRow, ScheduledBlockRow, TaskRow } from "../../shared/db";
 import { BOOKING_TOOL_SCHEMAS, runBookingTool } from "./bookingTools";
 import { COMMITMENT_TOOL_SCHEMAS, runCommitmentTool } from "./commitmentTools";
+import { forgetFacts, rememberFact } from "./chatMemory";
 import { snapshotIfCapturing } from "./undoJournal";
 import { ASK_MEMORY_SCHEMA, runAskMemory } from "./memoryIntent";
 import {
@@ -364,6 +365,23 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
   ...BOOKING_TOOL_SCHEMAS,
   ...COMMITMENT_TOOL_SCHEMAS,
   ASK_MEMORY_SCHEMA,
+  {
+    type: "function",
+    function: {
+      name: "remember_fact",
+      description:
+        "Keep one lasting fact about the user across chats (survives Clear chat): a preference, a regular place or person, a routine, or anything they say to remember. One short sentence in the third person, e.g. 'Prefers dinner around 8pm' or 'Their barber is Fade Co'. A newer fact on the same topic replaces the old one. Not for one-off requests or things already on the calendar. Never passwords, codes, card, bank or ID numbers.",
+      parameters: { type: "object", properties: { fact: { type: "string" } }, required: ["fact"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget_fact",
+      description: "The user asked you to forget something you remembered. Pass a few words naming it, e.g. 'barber'.",
+      parameters: { type: "object", properties: { about: { type: "string" } }, required: ["about"] },
+    },
+  },
 ];
 
 /**
@@ -1282,6 +1300,16 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       }
       await db.tasks.update(task.id, { status } as any);
       return { updated: true, task: { id: task.id, name: task.name, status } };
+    }
+
+    case "remember_fact": {
+      const r = await rememberFact(String(args.fact ?? ""));
+      return r.ok ? { remembered: r.fact.text, ...(r.replaced ? { replaced: r.replaced } : {}) } : { error: r.error };
+    }
+
+    case "forget_fact": {
+      const gone = await forgetFacts(String(args.about ?? ""));
+      return gone.length ? { forgot: gone } : { error: "Nothing remembered about that." };
     }
 
     case "ask_memory":

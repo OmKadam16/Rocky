@@ -5,6 +5,7 @@ import { PROVIDER_BASE_URL, normalizeProvider, resolveModelId } from "./models";
 import { getSecret } from "./secrets";
 import { SYSTEM_PROMPT } from "./plannerPrompt";
 import { MUTATING_TOOLS, contextSnapshot, runTool, toolSchemas } from "./plannerTools";
+import { loadMemory, memoryContext } from "./chatMemory";
 import { BOOKING_TOOL_NAMES, agentWaitingContext } from "./bookingTools";
 import { COMMITMENT_TOOL_NAMES } from "./commitmentTools";
 import { isAgentActive } from "./agentClient";
@@ -91,6 +92,39 @@ export type PlannerResult = {
  * The planner loop, in the browser: context in, tool calls executed against the
  * local database, natural-language reply out.
  */
+/** The planner's own client (provider, key, model), for small side calls. */
+async function plannerClient(): Promise<{ openai: OpenAI; model: string } | null> {
+  const profile = await db.profiles.get("local");
+  const key = (await getSecret("llm_key"))?.trim();
+  if (!key || (typeof navigator !== "undefined" && !navigator.onLine)) return null;
+  const provider = normalizeProvider((profile as unknown as { provider?: string | null })?.provider);
+  const openai = new OpenAI({
+    apiKey: key,
+    baseURL: PROVIDER_BASE_URL[provider] ?? PROVIDER_BASE_URL.OpenAI,
+    dangerouslyAllowBrowser: true,
+    defaultHeaders: provider === "Anthropic" ? { "anthropic-dangerous-direct-browser-access": "true" } : undefined,
+  });
+  return { openai, model: resolveModelId(profile?.model, provider) };
+}
+
+/** One plain completion on the planner's key (chat memory summary). Null on any failure. */
+export async function completeWithPlanner(p: { system: string; user: string }): Promise<string | null> {
+  try {
+    const c = await plannerClient();
+    if (!c) return null;
+    const r = await c.openai.chat.completions.create({
+      model: c.model,
+      messages: [
+        { role: "system", content: p.system },
+        { role: "user", content: p.user },
+      ],
+    });
+    return r.choices[0]?.message?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function askPlannerLocal(
   message: string,
   history: AssistantTurn[],
@@ -145,8 +179,12 @@ export async function askPlannerLocal(
     const prefText = prefs ? `Preferences: earliest ${earliest} to latest ${latest}${study.length ? `; preferred study ${study.map((h) => `${h.start}-${h.end}`).join(", ")}` : ""}.` : "";
     const about = aboutText ? `\n\nWhat the user told you about themselves: ${aboutText}${prefText ? `\n${prefText}` : ""}` : prefText ? `\n\n${prefText}` : "";
 
+    // Chat memory first: what the user asked Rocky to keep, and a summary of
+    // conversation that has left the window below (or was cleared).
+    const memory = memoryContext(await loadMemory());
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: SYSTEM_PROMPT + about },
+      ...(memory ? [{ role: "system", content: memory } as ChatCompletionMessageParam] : []),
       {
         role: "system",
         content: `Current context (JSON). Today is ${snapshot.today} (${snapshot.today_weekday}), the time is ${snapshot.now}. ` +

@@ -6,6 +6,8 @@ import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, is
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
+import { foldIntoSummary } from "../lib/chatMemory";
+import { completeWithPlanner } from "../lib/plannerLocal";
 import { commitmentCardFromTools, pendingProposalId } from "../lib/chatCards";
 import { startPendingBooking } from "../lib/bookingTools";
 import { cancelProposal, commitmentReply, confirmProposal, receiptText } from "../lib/commitmentProposals";
@@ -208,9 +210,15 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
     };
   }, [persist]);
 
+  /**
+   * Clear chat empties the messages, not Rocky's memory: everything not yet
+   * in the chat memory summary is folded in first (a few seconds at most).
+   */
   const clearChat = useCallback(async () => {
+    const old = turnsRef.current;
     turnsRef.current = [];
     setTurns([]);
+    await Promise.race([foldIntoSummary(old, completeWithPlanner, { all: true }), new Promise((r) => setTimeout(r, 8000))]).catch(() => {});
     if (persist) await clearStoredChat();
   }, [persist]);
 
@@ -331,6 +339,9 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
         const receipt = await endCapture();
         if (receipt) push({ role: "assistant", text: "", private: true, card: { kind: "receipt", text: receipt.text, undoId: receipt.undoId } });
         if (response.schedule_changed) onScheduleChange();
+        // Turns leaving the planner's window go into the chat memory summary
+        // (in the background, a handful at a time).
+        void foldIntoSummary(turnsRef.current, completeWithPlanner).catch(() => {});
         const base: AssistantTiming = {
           plannerMs: response.timing.totalMs,
           snapshotMs: response.timing.snapshotMs,
