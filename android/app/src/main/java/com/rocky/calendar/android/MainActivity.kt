@@ -10,6 +10,7 @@ import com.getcapacitor.BridgeActivity
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         registerPlugin(RockyApkUpdaterPlugin::class.java)
+        registerPlugin(RockyAgentBrowserPlugin::class.java)
         super.onCreate(savedInstanceState)
         // Spoken replies play without a second tap (the first tap unlocks audio).
         bridge.webView.settings.mediaPlaybackRequiresUserGesture = false

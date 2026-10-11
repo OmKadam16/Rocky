@@ -73,6 +73,8 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "shared/agentCore.mjs",
+      "shared/agentPageScripts.mjs",
       "package.json"
     ],
     "mac": {

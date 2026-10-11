@@ -34,9 +34,20 @@ jobs:
       - uses: android-actions/setup-android@v4
       - run: npm ci
       - run: npm run build:android:web
-      - name: Gradle assembleDebug
+      - name: Gradle assembleDebug (+ unit tests)
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        shell: bash
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew assembleDebug testDebugUnitTest --no-daemon --console=plain 2>&1 | tee gradle.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            # The reason, as one public annotation (logs need a login to read).
+            msg=$(grep -E "^e: |error:|What went wrong|Could not|> |FAILED|Exception" gradle.log | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Gradle failed::${msg}"
+          fi
+          exit $status
       - name: APK size
         run: ls -l android/app/build/outputs/apk/debug/
       - uses: actions/upload-artifact@v7
