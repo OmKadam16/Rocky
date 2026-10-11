@@ -55,7 +55,6 @@ export const PROVIDER_MODELS: Record<string, Model[]> = {
     { id: "gpt-5-nano", label: "GPT-5 nano (untested)", tested: false },
     { id: "gpt-5.4-mini", label: "GPT-5.4 mini (untested)", tested: false },
     { id: "gpt-5.4", label: "GPT-5.4 (untested)", tested: false },
-    { id: "gpt-5.5", label: "GPT-5.5 (untested)", tested: false },
   ],
   Gemini: [
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite (untested)", tested: false },

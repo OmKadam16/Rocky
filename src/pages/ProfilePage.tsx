@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { db } from "../lib/db";
+import { db, usingCloud } from "../lib/db";
 import { useAuth } from "../hooks/useAuth";
 import { useProfile } from "../hooks/useProfile";
 import UpdateCard from "../components/UpdateCard";
@@ -21,6 +21,8 @@ import { loadProgressSpeech, progressSpeechOn, setProgressSpeech } from "../lib/
 import { MEMORY_MODEL, checkOllama, hasMemoryModel } from "../lib/ollama";
 import { runVoiceSelfTest, type VoiceCheckStage } from "../lib/voiceCheck";
 import DevicesSection from "../components/DevicesSection";
+
+const KEY_STORE_NOTE = usingCloud ? "shared across your devices, only you can read it" : "this device only";
 
 
 const isVoiceId = (v: string) => /^[A-Za-z0-9]{16,}$/.test(v.trim());
@@ -269,7 +271,7 @@ export default function ProfilePage() {
                       <input type={llmKeyShown ? "text" : "password"} value={llmKey} onChange={(e) => { setLlmKey(e.target.value); setLlmTest(null); }} placeholder="Paste your API key" className="min-w-0 flex-1 border-0 bg-transparent font-mono text-[14px] text-ink outline-none" />
                       <button onClick={() => setLlmKeyShown((v) => !v)} className="flex-none cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">{llmKeyShown ? "Hide" : "Show"}</button>
                     </div>
-                    <span className="font-mono text-[10.5px] text-grey-soft">{llmKeyMask} — device only, never sent to Supabase</span>
+                    <span className="font-mono text-[10.5px] text-grey-soft">{llmKeyMask} — {KEY_STORE_NOTE}</span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={async () => {
@@ -297,7 +299,7 @@ export default function ProfilePage() {
                       <input type={browserKeyShown ? "text" : "password"} value={browserKey} onChange={(e) => { setBrowserKey(e.target.value); setBrowserTest(null); }} placeholder="Paste your browser key" className="min-w-0 flex-1 border-0 bg-transparent font-mono text-[14px] text-ink outline-none" />
                       <button onClick={() => setBrowserKeyShown((v) => !v)} className="flex-none cursor-pointer font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid hover:text-ink">{browserKeyShown ? "Hide" : "Show"}</button>
                     </div>
-                    <span className="font-mono text-[10.5px] text-grey-soft">{data?.profile.has_browser_key ? data.profile.browser_key_mask : "Not set"} — device only, never sent to Supabase</span>
+                    <span className="font-mono text-[10.5px] text-grey-soft">{data?.profile.has_browser_key ? data.profile.browser_key_mask : "Not set"} — {KEY_STORE_NOTE}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Booking agent model</span>
                       {BROWSER_MODELS.map((m) => (
@@ -514,7 +516,7 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="mt-11 border-b border-line pb-3 font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid">Things Jarvis should know about you</div>
+          <div className="mt-11 border-b border-line pb-3 font-mono text-[10.5px] tracking-[0.14em] uppercase text-grey-mid">Things Rocky should know about you</div>
           <div className="mt-[18px]">
             <textarea value={aboutText} onChange={(e) => setAboutText(e.target.value)} onBlur={() => void saveProfile({ about_text: aboutText })} placeholder="I focus better in the morning. Don't put anything before 9 even if I look free." className="box-border min-h-[116px] w-full resize-y rounded-[3px] border border-line-strong bg-card px-[17px] py-[15px] font-sans text-[15px] leading-[1.6] text-ink outline-none" />
             <div className="mt-[10px] font-mono text-[10.5px] text-grey-soft">Read before every plan it makes — synced to backend.</div>

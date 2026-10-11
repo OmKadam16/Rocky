@@ -631,10 +631,12 @@ export default function Onboarding({ onDone, theme, onToggleTheme }: Props) {
         {onb === 2 && (
           <div className="flex w-full items-start gap-[110px]">
             <div className="max-w-[420px]">
-              <div className="font-mono text-[10.5px] tracking-label uppercase text-grey-mid">Your keys — local only</div>
+              <div className="font-mono text-[10.5px] tracking-label uppercase text-grey-mid">{usingCloud ? "Your keys — your account only" : "Your keys — local only"}</div>
               <div className="mt-[22px] text-[44px] font-medium leading-[1.1] tracking-[-0.026em] text-pretty">Add your keys.</div>
               <div className="mt-6 text-[16px] leading-[1.55] text-ink-muted text-pretty">
-                AI is always on. Keys are stored only on this device, never sent to Supabase. Test both to continue.
+                {usingCloud
+                  ? "AI is always on. Keys are saved to your account, readable only by you, so your laptop and phone share them. Test both to continue."
+                  : "AI is always on. Keys are stored only on this device. Test both to continue."}
               </div>
               <div className="mt-8 rounded-[3px] border border-line bg-card px-[19px] py-[17px]">
                 <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Memory (optional)</div>

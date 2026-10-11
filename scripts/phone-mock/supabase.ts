@@ -107,6 +107,10 @@ const client = {
   storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }) }) },
 };
 
+export function supabaseConfigProblem(): { name: string; problem: string } | null {
+  return null;
+}
+export const SUPABASE_CONFIG_PROBLEM = null;
 export const isSupabaseConfigured = true;
 export function supabase() {
   return client as never;
