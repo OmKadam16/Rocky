@@ -8,6 +8,7 @@ const agent = vi.hoisted(() => ({
   started: [] as unknown[],
   answers: [] as string[],
   confirms: [] as boolean[],
+  prepared: [] as unknown[],
 }));
 vi.mock("./agentClient", () => ({
   agentAvailable: () => agent.available,
@@ -22,6 +23,9 @@ vi.mock("./agentClient", () => ({
     return true;
   },
   continueAgent: async () => agent.phase === "takeover",
+  prepareAgent: (t: unknown) => {
+    agent.prepared.push(t);
+  },
   confirmAgent: async (y: boolean) => {
     agent.confirms.push(y);
     return true;
@@ -76,6 +80,7 @@ beforeEach(() => {
   agent.started = [];
   agent.answers = [];
   agent.confirms = [];
+  agent.prepared = [];
 });
 
 describe("propose_booking: one question at a time, then a hold + full plan", () => {
@@ -93,6 +98,17 @@ describe("propose_booking: one question at a time, then a hold + full plan", () 
     expect(r3.summary).toMatch(/^Haircut at Fade Co in Pune, Saturday 3pm, name Alex Kim, phone 555-0100, email alex@example.com/);
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({ title: "Haircut — Fade Co (booking…)", start_time: "15:00", end_time: "16:00" });
+  });
+
+  it("a complete plan pre-opens the booking page but starts nothing", async () => {
+    const { cal } = calendar();
+    const r1 = (await runBookingTool("propose_booking", { type: "appointment", venue: "Fade Co", area: "Pune", date: "2099-10-17", start_time: "15:00" }, {}, cal)) as any;
+    expect(r1.question).toBeTruthy();
+    expect(agent.prepared).toHaveLength(0); // not while details are missing
+    await runBookingTool("propose_booking", FULL, {}, cal);
+    expect(agent.prepared).toHaveLength(1);
+    expect(agent.prepared[0]).toMatchObject({ venue: "Fade Co" });
+    expect(agent.started).toHaveLength(0);
   });
 
   it("fixed commitments win", async () => {
@@ -197,10 +213,15 @@ describe("voice fast path (confirmation #2 never goes through the planner)", () 
     expect(agent.confirms).toEqual([false]);
   });
 
-  it("a takeover resumes on 'continue'; ordinary questions go to the planner", async () => {
+  it("a takeover resumes on 'continue'", async () => {
     agent.phase = "takeover";
     expect(await agentFastPath("continue")).toBe("Carrying on.");
+  });
+
+  it("an answer to a pending agent question goes straight to the agent, verbatim, no planner", async () => {
     agent.phase = "question";
-    expect(await agentFastPath("outdoor please")).toBe(null);
+    agent.answers = [];
+    expect(await agentFastPath("outdoor please")).toBe("Got it.");
+    expect(agent.answers).toEqual(["outdoor please"]);
   });
 });

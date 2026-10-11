@@ -36,7 +36,7 @@ import {
   type SlotKey,
   type TaskType,
 } from "./bookingTask";
-import { agentAvailable, answerAgent, continueAgent, getAgentView, startAgent } from "./agentClient";
+import { agentAvailable, answerAgent, continueAgent, getAgentView, prepareAgent, startAgent } from "./agentClient";
 
 export const BOOKING_TOOL_NAMES = ["find_place", "propose_booking", "book_appointment", "answer_agent_question", "continue_agent"] as const;
 
@@ -285,6 +285,9 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       drafts.set(holdId, d);
       building = d;
       lastProposedHold = holdId;
+      // Load the booking page while the plan is read back; the run itself
+      // still waits for the yes (book_appointment).
+      if (agentAvailable()) prepareAgent(toAgentTask(d, holdId));
       return {
         proposed: true,
         summary: formatPlan(d),

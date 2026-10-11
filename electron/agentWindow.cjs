@@ -104,6 +104,36 @@ const PROBE_JS = `(() => {
   };
 })()`;
 
+/**
+ * Milliseconds since the page last changed in a way that matters (nodes
+ * added/removed, text, disabled/busy/hidden flips). Installs its observer on
+ * first call per document. Style/class churn (carousels, spinners' CSS) is
+ * ignored, or an animated page would never look settled.
+ */
+const QUIET_JS = `(() => {
+  const w = window;
+  if (!w.__rockyQuiet || w.__rockyQuiet.doc !== document) {
+    w.__rockyQuiet = { doc: document, last: performance.now() };
+    try {
+      new MutationObserver(() => { w.__rockyQuiet.last = performance.now(); }).observe(document, {
+        subtree: true, childList: true, characterData: true, attributes: true,
+        attributeFilter: ["disabled", "aria-busy", "aria-expanded", "hidden", "open", "value"],
+      });
+    } catch (e) {}
+  }
+  return Math.round(performance.now() - w.__rockyQuiet.last);
+})()`;
+
+/** Settling: page quiet for QUIET_MS, no request in flight, capped. */
+const QUIET_MS = 250;
+const SETTLE_CAP_MS = 2000;
+/** A top-level page load in progress gets a little longer before we shoot. */
+const NAV_CAP_MS = 4000;
+/** Requests older than this are long-polls / streams, not "loading". */
+const STALE_REQUEST_MS = 1500;
+
+const SHOT_JPEG_QUALITY = 85;
+
 const TEXT_JS = `(document.body ? document.body.innerText : "").slice(0, 20000)`;
 
 
@@ -118,6 +148,7 @@ function createAgentController(deps, options = {}) {
   let run = null;
   let log = [];
   let lastPause = null;
+  const inflight = new Map();
 
   const viewport = core.VIEWPORT;
 
@@ -134,10 +165,29 @@ function createAgentController(deps, options = {}) {
     ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
     ses.setPermissionCheckHandler(() => false);
     ses.on("will-download", (e) => e.preventDefault());
+    // In-flight request tracking for settle(). Sockets, beacons and media
+    // streams never "finish", so they don't count.
+    const skip = new Set(["webSocket", "ping", "media", "cspReport"]);
+    ses.webRequest.onBeforeRequest((d, cb) => {
+      if (!skip.has(d.resourceType)) inflight.set(d.id, Date.now());
+      cb({});
+    });
+    const drop = (d) => inflight.delete(d.id);
+    ses.webRequest.onCompleted(drop);
+    ses.webRequest.onErrorOccurred(drop);
     return ses;
   }
 
-  function ensureWindow() {
+  function networkIdle() {
+    const now = Date.now();
+    for (const [id, t] of inflight) {
+      if (now - t > 30000) inflight.delete(id); // leaked entry
+      else if (now - t < STALE_REQUEST_MS) return false;
+    }
+    return true;
+  }
+
+  function ensureWindow(focus = true) {
     if (win && !win.isDestroyed()) return;
     hardenSession();
     const opts = {
@@ -207,7 +257,8 @@ function createAgentController(deps, options = {}) {
       banner = null;
       site = null;
     });
-    win.show();
+    if (focus) win.show();
+    else win.showInactive();
   }
 
   const siteWc = () => {
@@ -299,7 +350,27 @@ function createAgentController(deps, options = {}) {
     // sendInputEvent both work in the 1280x800 CSS-pixel space.
     const fit = size.width === viewport.width && size.height === viewport.height ? img : img.resize({ width: viewport.width, height: viewport.height, quality: "good" });
     const s = fit.getSize();
-    return { dataUrl: `data:image/png;base64,${fit.toPNG().toString("base64")}`, width: s.width, height: s.height };
+    // JPEG, not PNG: a photo-heavy booking page is ~1-2 MB as PNG and
+    // ~150-250 KB as JPEG at q85, the same pixels and coordinates. The model
+    // bills by pixel patches, not bytes, so this only cuts upload time.
+    return { dataUrl: `data:image/jpeg;base64,${fit.toJPEG(SHOT_JPEG_QUALITY).toString("base64")}`, width: s.width, height: s.height };
+  }
+
+  /**
+   * Pre-opened page (prepare): the first navigate of a run to the same URL
+   * waits for that load instead of starting a new one.
+   */
+  let prepared = null;
+  const PREPARED_TTL_MS = 10 * 60 * 1000;
+
+  async function navigateRun(url) {
+    const p = prepared;
+    prepared = null;
+    if (p && p.url === url && Date.now() - p.at < PREPARED_TTL_MS && site && !site.webContents.isDestroyed()) {
+      await p.promise;
+      return;
+    }
+    return navigate(url);
   }
 
   async function navigate(url) {
@@ -314,11 +385,30 @@ function createAgentController(deps, options = {}) {
     ]);
   }
 
-  async function settle() {
+  /**
+   * Event-based settle: done when the page isn't loading, no request is in
+   * flight and the DOM has been quiet for QUIET_MS, after a short minimum
+   * (so a click's fetch has started) and never longer than the cap.
+   * opts: { minMs, capMs, afterType } (afterType: autocomplete needs a beat).
+   */
+  async function settle(opts = {}) {
     const wc = siteWc();
     const start = Date.now();
-    while (wc.isLoading() && Date.now() - start < 8000) await sleep(150);
-    await sleep(500);
+    const minMs = opts.minMs ?? (opts.afterType ? 300 : 120);
+    const cap = opts.capMs ?? SETTLE_CAP_MS;
+    for (;;) {
+      const elapsed = Date.now() - start;
+      const loading = wc.isLoading();
+      if (elapsed >= (loading ? Math.max(cap, NAV_CAP_MS) : cap)) break;
+      if (elapsed >= minMs && !loading && networkIdle()) {
+        const quiet = await evalMain(QUIET_JS).catch(() => QUIET_MS);
+        if (Number(quiet) >= QUIET_MS) break;
+      } else if (elapsed < 60) {
+        // Arm the observer early so the quiet clock starts with this step.
+        await evalMain(QUIET_JS).catch(() => 0);
+      }
+      await sleep(40);
+    }
   }
 
   async function input(step) {
@@ -421,6 +511,21 @@ function createAgentController(deps, options = {}) {
     };
   }
 
+  /**
+   * Open the window and load the start page while Rocky reads the plan back.
+   * Nothing is clicked or typed: the run itself still waits for the yes.
+   */
+  function prepare(task) {
+    if (active()) return { ok: false };
+    const url = core.startUrlFor(task);
+    if (!isWeb(url)) return { ok: false };
+    ensureWindow(false);
+    if (prepared && prepared.url === url) return { ok: true };
+    prepared = { url, at: Date.now(), promise: navigate(url).catch(() => {}) };
+    setBanner("Rocky is ready", "Opened the booking page. Waiting for your yes.", true);
+    return { ok: true };
+  }
+
   async function start(task) {
     if (active()) return { error: "A booking is already running. Stop it first." };
     if (!options.callModel && !deps.getKey()) return { error: "No browser key. Add it in Profile → Model." };
@@ -429,7 +534,7 @@ function createAgentController(deps, options = {}) {
     lastPause = null;
     run = new core.BookingRun(
       task,
-      { callModel, screenshot, navigate, history, input, settle, probe, describePoint, describeFocus, pageText, emit, now: () => Date.now(), sleep },
+      { callModel, screenshot, navigate: navigateRun, history, input, settle, probe, describePoint, describeFocus, pageText, emit, now: () => Date.now(), sleep },
       { limits: options.limits },
     );
     void run.start();
@@ -438,6 +543,7 @@ function createAgentController(deps, options = {}) {
 
   return {
     start,
+    prepare,
     answer: (text) => Boolean(run && run.answer(text)),
     confirm: (yes) => Boolean(run && run.confirm(yes === true)),
     continueRun: () => Boolean(run && run.continueRun()),
@@ -457,6 +563,7 @@ function sleep(ms) {
 function registerAgentIpc(controller) {
   ipcMain.handle("agent:available", () => true);
   ipcMain.handle("agent:start", (_e, task) => controller.start(task && typeof task === "object" ? task : {}));
+  ipcMain.handle("agent:prepare", (_e, task) => controller.prepare(task && typeof task === "object" ? task : {}));
   ipcMain.handle("agent:answer", (_e, text) => controller.answer(String(text ?? "").slice(0, 500)));
   ipcMain.handle("agent:confirm", (_e, yes) => controller.confirm(yes === true));
   ipcMain.handle("agent:continue", () => controller.continueRun());

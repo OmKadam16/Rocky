@@ -457,7 +457,7 @@ describe("computer actions -> sendInputEvent", () => {
     expect(ctrlA.map((x) => x.input.type)).toEqual(["keyDown", "keyUp"]);
     expect(ctrlA[0].input).toMatchObject({ keyCode: "A", modifiers: ["control"] });
     expect(toInputSteps({ type: "type", text: "Om" }, s)).toEqual([{ insertText: "Om" }]);
-    expect(toInputSteps({ type: "wait" }, s)).toEqual([{ sleep: 1500 }]);
+    expect(toInputSteps({ type: "wait" }, s)).toEqual([{ wait: true }]);
   });
 
   it("human-readable steps", () => {
@@ -550,5 +550,41 @@ describe("per-step timing", () => {
     expect(failed.timing.avgStepMs).toBeGreaterThan(0);
     // No screenshot, URL or user text rides on timing events.
     expect(JSON.stringify(h.ofType("timing"))).not.toMatch(/data:image|indoor|https?:/);
+  });
+});
+
+describe("speed settings", () => {
+  it("low effort by default, one medium step after a blocked click, stable cache key", async () => {
+    const h = harness({
+      targets: { "640,700": RESERVE },
+      script: [cc(click(640, 700)), cc({ type: "screenshot" }), cc({ type: "screenshot" }), fc("give_up", { reason: "x" })],
+    });
+    // Contact typed so the plain final click is gated.
+    await h.run.start();
+    await h.run.current;
+    expect(h.bodies[0].reasoning.effort).toBe("low");
+    expect(h.bodies[1].reasoning.effort).toBe("medium"); // right after the blocked final click
+    expect(h.bodies[2].reasoning.effort).toBe("low");
+    expect(new Set(h.bodies.map((b) => b.prompt_cache_key))).toEqual(new Set(["rocky-booking-agent-v2"]));
+    expect(new Set(h.bodies.map((b) => b.instructions)).size).toBe(1);
+  });
+
+  it("'wait' settles on page events instead of a fixed sleep", async () => {
+    const settles = [];
+    const h = harness({ script: [cc({ type: "wait" }), fc("give_up", { reason: "x" })] });
+    h.deps.settle = async (o) => void settles.push(o || {});
+    await h.run.start();
+    await h.run.current;
+    expect(h.inputs.some((s) => s.sleep)).toBe(false);
+    expect(settles[0]).toMatchObject({ minMs: 500, capMs: 3000 });
+  });
+
+  it("typing asks settle for the autocomplete beat", async () => {
+    const settles = [];
+    const h = harness({ focus: { tag: "input", type: "text", name: "city" }, script: [cc(type("Pune")), fc("give_up", { reason: "x" })] });
+    h.deps.settle = async (o) => void settles.push(o || {});
+    await h.run.start();
+    await h.run.current;
+    expect(settles[0]).toMatchObject({ afterType: true });
   });
 });

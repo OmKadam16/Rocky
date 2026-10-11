@@ -55,6 +55,8 @@ const DEFAULT_LIMITS = Object.freeze({
   maxQuestions: 8,
 });
 
+const PROMPT_CACHE_KEY = "rocky-booking-agent-v2";
+
 const TASK_TYPES = new Set(["restaurant", "appointment", "tickets"]);
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,12 @@ function normalizeTask(raw) {
     holdBlockId: str(t.holdBlockId, 100) || null,
     model,
   };
+}
+
+/** Where a run starts: the named site, else a search. */
+function startUrlFor(rawTask) {
+  const task = normalizeTask(rawTask);
+  return task.startUrl || searchUrlFor(task);
 }
 
 /** The search fallback when the user named no site. */
@@ -413,7 +421,8 @@ function toInputSteps(action, scale, viewport = VIEWPORT) {
       return steps;
     }
     case "wait":
-      return [{ sleep: 1500 }];
+      // Event-based: the driver waits for the page to go quiet (capped).
+      return [{ wait: true }];
     case "screenshot":
     default:
       return [];
@@ -594,7 +603,7 @@ class BookingRun {
     if (this.state !== "idle") throw new Error("Run already started.");
     this.state = "running";
     this.resumedAt = this.deps.now();
-    const url = this.task.startUrl || searchUrlFor(this.task);
+    const url = startUrlFor(this.task);
     this.status("Opening page");
     try {
       await this.timed("navMs", () => this.deps.navigate(url));
@@ -802,9 +811,15 @@ class BookingRun {
       tools: TOOLS,
       input: this.input,
       parallel_tool_calls: false,
-      reasoning: { effort: "low" },
+      // Low for ordinary steps; one medium step right after a blocked,
+      // looping or text-only step, then back to low.
+      reasoning: { effort: this.boost ? "medium" : "low" },
       truncation: "auto",
+      // Stable instructions + tools first, same key every run: routes runs to
+      // the same prompt cache. No user data in it.
+      prompt_cache_key: PROMPT_CACHE_KEY,
     };
+    this.boost = false;
     if (this.prevId) body.previous_response_id = this.prevId;
     return body;
   }
@@ -841,6 +856,7 @@ class BookingRun {
         .trim();
       if (this.nudges < 2) {
         this.nudges += 1;
+        this.boost = true;
         this.input.push({
           role: "user",
           content: [{ type: "input_text", text: "Rocky: act with the computer tool, or call ask_user, request_final_confirmation, report_booked, handoff_to_user or give_up. Text replies are not shown to the user." }],
@@ -897,7 +913,9 @@ class BookingRun {
       if (result && result.stop) return;
     }
     if (this.state !== "running") return;
-    await this.timed("settleMs", () => this.deps.settle());
+    // Typing into an autocomplete needs a beat for the suggestions to appear.
+    const typed = actionsOf(call).some((x) => x && x.type === "type");
+    await this.timed("settleMs", () => this.deps.settle({ afterType: typed }));
     if (await this.checkPage()) {
       this.pending.computerCallId = call.call_id;
       this.pending.acknowledged = call.acknowledged || [];
@@ -906,7 +924,10 @@ class BookingRun {
     const shot = await this.shoot();
     if (!shot) return;
     this.input.push(this.computerOutput(call.call_id, shot, call.acknowledged));
-    if (blocked) this.input.push({ role: "user", content: [{ type: "input_text", text: `Rocky: ${blocked}` }] });
+    if (blocked) {
+      this.boost = true;
+      this.input.push({ role: "user", content: [{ type: "input_text", text: `Rocky: ${blocked}` }] });
+    }
   }
 
   /** Execute one action under the gates. */
@@ -916,6 +937,8 @@ class BookingRun {
     if (a.type !== "screenshot") {
       this.recent.push(sig);
       if (this.recent.length > this.limits.maxRepeats) this.recent.shift();
+      // The same action twice in a row: think harder next turn.
+      if (this.recent.length >= 2 && this.recent[this.recent.length - 2] === sig) this.boost = true;
       if (this.recent.length === this.limits.maxRepeats && this.recent.every((s) => s === sig)) {
         this.fail(`Stuck repeating the same step (${describeAction(a)})`);
         return { stop: true };
@@ -963,6 +986,11 @@ class BookingRun {
     this.lastStep = text;
     if (a.type !== "screenshot") this.emit({ type: "step", n: this.steps, text });
     const steps = toInputSteps(a, scale, this.viewport);
+    if (steps.length === 1 && steps[0].wait) {
+      // "wait": until the page is quiet, at least half a second, at most 3s.
+      await this.timed("settleMs", () => this.deps.settle({ minMs: 500, capMs: 3000 }));
+      return null;
+    }
     const stopped = await this.timed("actionMs", async () => {
       for (const s of steps) {
         if (this.state !== "running") return true;
@@ -1117,6 +1145,7 @@ module.exports = {
   BookingRun,
   normalizeTask,
   searchUrlFor,
+  startUrlFor,
   taskText,
   looksLikeCardNumber,
   sensitiveFieldKind,

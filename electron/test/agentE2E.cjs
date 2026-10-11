@@ -22,6 +22,7 @@ const { createAgentController } = require("../agentWindow.cjs");
 
 const FIXTURE = path.join(__dirname, "fixtures", "booking-site", "index.html");
 const bookings = [];
+let pageLoads = 0;
 
 function serve() {
   return new Promise((resolve) => {
@@ -36,6 +37,7 @@ function serve() {
         });
         return;
       }
+      if (req.url === "/") pageLoads += 1;
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       if (req.url.startsWith("/recaptcha/")) return res.end("<!doctype html><body style='margin:0;background:#f9f9f9'>[captcha widget]</body>");
       if (req.url === "/captcha") {
@@ -136,6 +138,13 @@ async function main() {
     },
   );
 
+  // Pre-open during the read-back: the page loads, nothing is clicked, and
+  // the run that follows reuses that load instead of loading it again.
+  const prepTask = { type: "restaurant", venue: "Testaurant", startUrl: url };
+  controller.prepare(prepTask);
+  await new Promise((r) => setTimeout(r, 1500));
+  check(pageLoads === 1 && bodies.length === 0 && !controller.state().active, "prepare opened the page without starting a run");
+
   const started = await controller.start({
     type: "restaurant",
     venue: "Testaurant",
@@ -151,6 +160,7 @@ async function main() {
     holdBlockId: "hold-e2e",
   });
   check(started.ok, "run started in the agent window");
+  const loadsAtStart = pageLoads;
 
   const q = await next("question");
   check(q.question === "Indoor or outdoor seating?" && controller.state().state === "waiting_answer", "ask_user paused the run with the question");
@@ -165,7 +175,8 @@ async function main() {
   check(bodies[4].previous_response_id === "resp_4", "resumed with previous_response_id (same model conversation)");
   check(events.some((e) => e.type === "step" && e.blocked && /Confirm reservation/.test(e.text)), "final click blocked before any yes");
   check(bookings.length === 0, "site received no booking before the yes");
-  check(conf.kind === "final" && /^data:image\/png;base64,/.test(conf.screenshot), "final confirmation shows a screenshot");
+  check(loadsAtStart === 1 && pageLoads === 1, "the run reused the pre-opened page (no second load)");
+  check(conf.kind === "final" && /^data:image\/jpeg;base64,/.test(conf.screenshot), "final confirmation shows a screenshot");
 
   controller.confirm(true);
   const done = await next("done", 30000);
@@ -175,10 +186,11 @@ async function main() {
   check(done.status === "booked" && done.reference === "RK-20481", `done: ${done.status}, ref ${done.reference}`);
   check(/confirmed/i.test(done.confirmationText), "confirmation text read off the page");
 
-  // Screenshot geometry: decode the PNG header of one capture.
-  const png = Buffer.from(String(shots[0]).split(",")[1] || "", "base64");
-  const w = png.readUInt32BE(16);
-  const h = png.readUInt32BE(20);
+  // Screenshot geometry: decode the JPEG frame header of one capture.
+  const { nativeImage } = require("electron");
+  const size = nativeImage.createFromDataURL(String(shots[0])).getSize();
+  const w = size.width;
+  const h = size.height;
   check(w === 1280 && h === 800, `screenshots are ${w}x${h}`);
 
   // A visible CAPTCHA stops the run and hands over; the invisible one above didn't.

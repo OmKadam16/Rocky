@@ -188,6 +188,18 @@ export function splitForSpeech(text: string, maxLen = 280): string[] {
   return chunks.filter(Boolean);
 }
 
+/**
+ * Speak the first sentence on its own when a reply has several: a short
+ * first request comes back sooner, and the rest is fetched while it plays.
+ */
+export function leadSentenceFirst(chunks: string[]): string[] {
+  const first = chunks[0];
+  if (!first || first.length < 120) return chunks;
+  const m = first.match(/^(.{12,}?[.!?])\s+(\S.*)$/s);
+  if (!m) return chunks;
+  return [m[1], m[2], ...chunks.slice(1)];
+}
+
 function canUseMediaSource(): boolean {
   try {
     return typeof MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg");
@@ -368,13 +380,17 @@ async function playStreamViaMediaSource(body: ReadableStream<Uint8Array>, contro
   }
 }
 
-async function speakOneChunk(chunk: string, key: string, voiceId: string, controller: AbortController): Promise<void> {
-  const resp = await fetch(ttsStreamUrl(voiceId), {
+function fetchTts(chunk: string, key: string, voiceId: string, controller: AbortController): Promise<Response> {
+  return fetch(ttsStreamUrl(voiceId), {
     method: "POST",
     headers: { "xi-api-key": key, "Content-Type": "application/json" },
     body: JSON.stringify({ text: chunk, model_id: TTS_MODEL }),
     signal: controller.signal,
   });
+}
+
+async function speakOneChunk(chunk: string, key: string, voiceId: string, controller: AbortController, prefetched?: Promise<Response>): Promise<void> {
+  const resp = await (prefetched ?? fetchTts(chunk, key, voiceId, controller));
   if (!resp.ok) {
     let detail = "";
     try {
@@ -444,10 +460,16 @@ export async function speak(text: string, opts?: { signal?: AbortSignal }): Prom
 
   try {
     const voiceId = await selectedVoiceId();
-    const chunks = splitForSpeech(text);
-    for (const chunk of chunks) {
+    const chunks = leadSentenceFirst(splitForSpeech(text));
+    // The next chunk's audio is requested while the current one plays, so
+    // there is no gap between sentences.
+    let next: Promise<Response> | undefined = chunks.length ? fetchTts(chunks[0], key, voiceId, controller) : undefined;
+    for (let i = 0; i < chunks.length; i += 1) {
       if (controller.signal.aborted) return;
-      await speakOneChunk(chunk, key, voiceId, controller);
+      const current = next;
+      next = i + 1 < chunks.length ? fetchTts(chunks[i + 1], key, voiceId, controller) : undefined;
+      next?.catch(() => {}); // surfaced when (if) it's played
+      await speakOneChunk(chunks[i], key, voiceId, controller, current);
     }
   } catch (error) {
     if ((error as DOMException)?.name === "AbortError") return;

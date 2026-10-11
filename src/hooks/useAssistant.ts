@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantState, AssistantTurn } from "../types";
 import { askPlanner } from "../lib/planner";
 import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, stopSpeaking } from "../lib/speech";
-import { cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, subscribeAgent } from "../lib/agentClient";
+import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, subscribeAgent } from "../lib/agentClient";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 
 export const DEFAULT_SILENCE_MS = 1200;
@@ -78,6 +78,15 @@ export async function agentFastPath(text: string): Promise<string | null> {
       return null; // the agent announces the cancel itself
     }
     return "Say yes to book it, or no to stop.";
+  }
+  if (v.phase === "question") {
+    // The agent asked; this is the answer. Verbatim, straight to the agent,
+    // no planner round trip.
+    if (isStop(text)) {
+      await cancelAgent();
+      return null;
+    }
+    return (await answerAgent(text)) ? "Got it." : null;
   }
   if (v.phase === "takeover") {
     if (isContinue(text) || isExplicitYes(text)) return (await continueAgent()) ? "Carrying on." : null;

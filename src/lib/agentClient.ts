@@ -104,6 +104,8 @@ const IDLE: AgentView = {
 export type AgentBackend = {
   kind: "local" | "relay";
   start: (task: AgentTask) => Promise<{ ok?: boolean; error?: string }>;
+  /** Pre-open the start page while the plan is read back (no clicks). */
+  prepare?: (task: AgentTask) => Promise<unknown>;
   answer: (text: string) => Promise<boolean>;
   confirm: (yes: boolean) => Promise<boolean>;
   continue: () => Promise<boolean>;
@@ -113,6 +115,7 @@ export type AgentBackend = {
 type DesktopAgentBridge = {
   available: () => Promise<boolean>;
   start: (task: AgentTask) => Promise<{ ok?: boolean; error?: string }>;
+  prepare?: (task: AgentTask) => Promise<unknown>;
   answer: (text: string) => Promise<boolean>;
   confirm: (yes: boolean) => Promise<boolean>;
   continue: () => Promise<boolean>;
@@ -168,6 +171,7 @@ export function backend(): AgentBackend | null {
         await getSecret("browser_key").catch(() => null);
         return d.start(t);
       },
+      prepare: async (t) => d.prepare?.(t),
       answer: (t) => d.answer(t),
       confirm: (y) => d.confirm(y),
       continue: () => d.continue(),
@@ -302,6 +306,16 @@ export async function startAgent(task: AgentTask, origin: "here" | "phone" = "he
     set({ phase: "idle", status: "" });
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * Open the agent window on the start page while the plan is being read back,
+ * so the page is already loaded when the user says yes. Fire and forget.
+ */
+export function prepareAgent(task: AgentTask): void {
+  const b = backend();
+  if (!b?.prepare || isAgentActive()) return;
+  void b.prepare(task).catch(() => {});
 }
 
 export async function answerAgent(text: string): Promise<boolean> {

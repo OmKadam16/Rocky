@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("rocky", {
     /** Only defined on desktop: the planner hands over a link everywhere else. */
     available: () => ipcRenderer.invoke("agent:available"),
     start: (task) => ipcRenderer.invoke("agent:start", task),
+    /** Pre-open the start page during the read-back. Never acts on it. */
+    prepare: (task) => ipcRenderer.invoke("agent:prepare", task),
     answer: (text) => ipcRenderer.invoke("agent:answer", text),
     confirm: (yes) => ipcRenderer.invoke("agent:confirm", yes === true),
     continue: () => ipcRenderer.invoke("agent:continue"),

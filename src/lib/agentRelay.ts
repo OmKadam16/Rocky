@@ -12,7 +12,7 @@
  * Relay rows are deleted shortly after use.
  */
 import { supabase, uniqueChannel } from "./supabase";
-import { applyAgentEvent, setRelayBackend, startAgent, answerAgent, confirmAgent, continueAgent, cancelAgent, tapAgentEvents, type AgentBackend, type AgentEvent } from "./agentClient";
+import { applyAgentEvent, setRelayBackend, startAgent, prepareAgent, answerAgent, confirmAgent, continueAgent, cancelAgent, tapAgentEvents, type AgentBackend, type AgentEvent } from "./agentClient";
 import type { AgentTask } from "./bookingTask";
 
 export const REQUEST_MARK = "rocky-agent:v1";
@@ -22,6 +22,7 @@ const RETENTION_MS = 2 * 60_000;
 
 export type RelayOp =
   | { op: "start"; task: AgentTask }
+  | { op: "prepare"; task: AgentTask }
   | { op: "answer"; text: string }
   | { op: "confirm"; yes: boolean }
   | { op: "continue" }
@@ -60,6 +61,8 @@ export function parseRequest(diff: unknown): RelayOp | null {
   switch (d.op) {
     case "start":
       return d.task && typeof d.task === "object" ? { op: "start", task: d.task as AgentTask } : null;
+    case "prepare":
+      return d.task && typeof d.task === "object" ? { op: "prepare", task: d.task as AgentTask } : null;
     case "answer":
       return typeof d.text === "string" && d.text.trim() ? { op: "answer", text: d.text.slice(0, 500) } : null;
     case "confirm":
@@ -92,6 +95,9 @@ async function runRequest(op: RelayOp): Promise<{ ok: boolean; error?: string }>
   switch (op.op) {
     case "start":
       return startAgent(op.task, "phone");
+    case "prepare":
+      prepareAgent(op.task);
+      return { ok: true };
     case "answer":
       return { ok: await answerAgent(op.text) };
     case "confirm":
@@ -182,6 +188,7 @@ export function startAgentRelayClient(): () => void {
   const backend: AgentBackend = {
     kind: "relay",
     start: (task) => send({ op: "start", task }),
+    prepare: (task) => send({ op: "prepare", task }),
     answer: async (text) => (await send({ op: "answer", text })).ok,
     confirm: async (yes) => (await send({ op: "confirm", yes })).ok,
     continue: async () => (await send({ op: "continue" })).ok,
