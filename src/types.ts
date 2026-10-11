@@ -36,10 +36,38 @@ export type WeekSummary = {
 
 export type AssistantState = "idle" | "listening" | "thinking" | "speaking";
 
+/** Fields of a fixed commitment as proposed in chat (days: 0 = Sunday). */
+export type CommitmentFields = {
+  name: string;
+  type: "Class" | "Work" | "Gym" | "Other";
+  days_of_week: number[];
+  start_time: string;
+  end_time: string;
+  active_from: string | null;
+  active_until: string | null;
+  notes: string | null;
+};
+
+export type MemorySource = { title: string; url: string; domain: string; capturedAt: string };
+
+/** Rich content rendered inline in the chat (components, not text). */
+export type ChatCard =
+  | { kind: "commitment"; proposalId: string; op: "add" | "update" | "delete"; fields: CommitmentFields; conflicts: string[] }
+  | { kind: "memory"; status: "answered" | "none" | "off" | "unavailable"; answer: string; sources: MemorySource[] }
+  | { kind: "receipt"; text: string; undoId: string | null };
+
 export type AssistantTurn = {
   id: string;
   role: "assistant" | "user";
   text: string;
+  card?: ChatCard;
+  /**
+   * Never sent to the cloud planner as history: Memory questions and answers
+   * (browsing data stays on the laptop) and UI-only receipts.
+   */
+  private?: boolean;
+  /** ms since epoch, for the persisted chat. */
+  at?: number;
 };
 
 export type ViewName = "day" | "week" | "month" | "search";

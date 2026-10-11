@@ -10,6 +10,11 @@ import { isAgentActive } from "./agentClient";
 import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
 import type { AssistantTurn } from "../types";
 
+/** The last few turns the cloud planner may see: never private ones. */
+export function plannerHistory(history: AssistantTurn[], max = 8): AssistantTurn[] {
+  return history.filter((t) => !t.private).slice(-max);
+}
+
 const MAX_TOOL_ROUNDS = 8;
 
 /**
@@ -152,7 +157,8 @@ export async function askPlannerLocal(
                 ].join("; ")}. Nothing else is on today.`) +
             `\n${JSON.stringify(snapshot)}`,
       },
-      ...history.slice(-8).map((turn) => ({ role: turn.role, content: turn.text }) as ChatCompletionMessageParam),
+      // Private turns (Memory questions/answers, receipts) never reach the cloud planner.
+      ...plannerHistory(history).map((turn) => ({ role: turn.role, content: turn.text }) as ChatCompletionMessageParam),
       { role: "user", content: message },
     ];
 

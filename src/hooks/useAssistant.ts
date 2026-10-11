@@ -5,6 +5,7 @@ import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, st
 import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, submitAgentCode, subscribeAgent } from "../lib/agentClient";
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
+import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 
 export const DEFAULT_SILENCE_MS = 1200;
 export const SILENCE_STORAGE_KEY = "vc-silence-ms";
@@ -43,7 +44,9 @@ export type SendOpts = {
 export const CODE_PLACEHOLDER = "•••• (verification code)";
 
 let turnId = 0;
-const nextId = () => `turn-${(turnId += 1)}`;
+// Unique across sessions: the persisted chat keys on it.
+const SESSION = Date.now().toString(36);
+const nextId = () => `turn-${SESSION}-${(turnId += 1)}`;
 
 /**
  * Things people say while thinking. Acting on these is what makes an assistant
@@ -157,7 +160,13 @@ export async function routeAgentTurn(text: string): Promise<{ planner: boolean; 
   return { planner: true, reply: null };
 }
 
-export function useAssistant(onScheduleChange: () => void) {
+export type AssistantOptions = {
+  /** Keep the chat in local history (Dashboard chat). Off for the phone and side panel. */
+  persist?: boolean;
+};
+
+export function useAssistant(onScheduleChange: () => void, options: AssistantOptions = {}) {
+  const persist = options.persist === true;
   const [state, setState] = useState<AssistantState>("idle");
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [caption, setCaption] = useState("");
@@ -172,11 +181,33 @@ export function useAssistant(onScheduleChange: () => void) {
   const isConversationRef = useRef(false);
 
   const push = useCallback((turn: Omit<AssistantTurn, "id">) => {
-    const full = { ...turn, id: nextId() };
+    const full: AssistantTurn = { ...turn, id: nextId(), at: Date.now() };
     turnsRef.current = [...turnsRef.current, full];
     setTurns(turnsRef.current);
+    if (persist) void saveTurn(full);
     return full;
-  }, []);
+  }, [persist]);
+
+  // Persisted chat: earlier turns come back on load (oldest first).
+  useEffect(() => {
+    if (!persist) return;
+    let live = true;
+    void loadChat().then((saved) => {
+      if (!live || !saved.length) return;
+      const ids = new Set(turnsRef.current.map((t) => t.id));
+      turnsRef.current = [...saved.filter((t) => !ids.has(t.id)), ...turnsRef.current];
+      setTurns(turnsRef.current);
+    });
+    return () => {
+      live = false;
+    };
+  }, [persist]);
+
+  const clearChat = useCallback(async () => {
+    turnsRef.current = [];
+    setTurns([]);
+    if (persist) await clearStoredChat();
+  }, [persist]);
 
   const send = useCallback(
     async (text: string, opts?: SendOpts) => {
@@ -489,6 +520,8 @@ export function useAssistant(onScheduleChange: () => void) {
   }, [state, listen, endTurn, stopConversation]);
 
   return {
+    pushTurn: push,
+    clearChat,
     state,
     turns,
     caption,

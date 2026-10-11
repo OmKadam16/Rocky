@@ -120,6 +120,8 @@ Done when: the full pair → talk → laptop updates loop works on a real phone.
 5. Log latency (speech-to-text ms, planner ms, total ms) in a small debug panel (hidden by default).
 
 ### Phase 3: Memory (local, optional)
+> Superseded by Phase 10 (2026-10-10, Om): storage moves from Dexie to an SQLite store in the
+> Electron main process, fed by a Chrome extension. Items 1, 3–5 carry over there.
 Goal: Rocky can answer "what did I read about X" from things the user saved, without
 anything leaving the laptop.
 1. User turns Memory on in onboarding or the Memory page; app checks Ollama is running and
@@ -219,6 +221,37 @@ ordered `actions` array (batched), not one `action`; screenshots go back as
 `pending_safety_checks` and are echoed back as `acknowledged_safety_checks` only after the user
 approves. The guide's examples use newer models; `gpt-5.4` still lists computer use.
 
+### Phase 9: Universal chat dashboard
+Goal: one chat on the Dashboard handles commitments, calendar/tasks, bookings and Memory.
+- [x] Dashboard = [Sidebar] | [chat ~55%] | [selected day ~30%, prev/next/Today, live]. Chat-only
+      under 1100px. Side AssistantPanel hidden on the Dashboard only; other pages and the phone
+      unchanged. Same assistant (useAssistant), typed + mic, listening/thinking state.
+- [x] Chat history local only (separate Dexie DB `RockyChat`, last 200, Clear chat). Private
+      turns (Memory, receipts) never go to the cloud planner (`plannerHistory`, tested).
+- [ ] Commitments by chat: `propose_commitment` / change / removal → CommitmentCard
+      (Confirm / Edit / Cancel); only Confirm or a spoken yes (code fast path) writes.
+- [ ] Booking cards inline (live AgentCard in the thread) + "added to your calendar" receipts
+      with Undo for the last action.
+
+### Phase 10: Memory + Chrome extension (all local)
+Goal: "what did I read about X" works from pages the user actually visited; nothing leaves
+the laptop. Model: Ollama `qwen3.5:2b` (think:false, temperature 0.1) only writes the answer;
+code does the search.
+- [ ] Store in the Electron main process: `node:sqlite` (built into Electron 44, FTS5 + BM25
+      verified, no native build) in userData. Retention (default 90 days) + size cap.
+- [ ] Ingest server on 127.0.0.1 only, POST /ingest, pairing token + extension Origin check,
+      body cap, no CORS wildcard; runs only while the app runs and Memory is on.
+- [ ] Chrome MV3 extension (`extension/`, `npm run build:extension` → `extension/dist`):
+      capture on tab complete via the service worker + `chrome.scripting` (no static
+      content script); automatic capture needs the user to grant optional host access in the
+      popup, otherwise only "Save this page now" (`activeTab`). Exclusions, pause, no incognito,
+      no password/payment pages, never input/textarea text, dedupe, offline queue.
+- [ ] Memory page = control panel (on/off, pause, pairing token, excluded sites, storage,
+      retention, saved pages list with delete / delete everything, Ollama status, install steps).
+- [ ] Memory in the chat: code-side intent + date parser, local search, local Qwen answer,
+      MemoryResultCard with sources; the planner only ever gets "Answered from Memory, shown
+      to the user". Clear one-line messages when Memory is off / Ollama down / nothing found.
+
 ---
 
 ## 6. Do not build
@@ -314,3 +347,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Fix from the first live run (Nobu): OpenAI 400 "Computer tool only allows input image without previous response". After open_url / a continued handoff the loop no longer sends a plain screenshot message; it asks the model to take a screenshot, which comes back as computer_call_output. Regression tests added (135 unit, E2E 17/17). Installer rebuilt and reinstalled.
 - 2026-10-10: Retrying a booking reuses its earlier failed/unclear hold instead of reporting a clash with it (the in-memory draft doesn't survive an app restart). 136 unit tests. Installer rebuilt and reinstalled.
 - 2026-10-10: Booking Agent v2 speed, reassurance and OTP: per-step timing + run summary (debug readout); event-based settle, JPEG shots, pre-opened start page, planner-free answers, TTS prefetch (local overhead per acting step on the E2E fixture ~594ms → ~350-410ms; model time not measurable here, see report); spoken progress updates with the new Profile → Voice setting (no migration); booking-contact verification codes typed by code, never stored or relayed. 174 unit tests + 28-check E2E. Installer rebuilt and reinstalled.
+- 2026-10-10: Phase 9 started: Dashboard is now Sidebar | universal chat | selected day (chat-only under 1100px), chat history in a local-only Dexie DB (last 200, Clear chat), private turns never reach the cloud planner. Old DashboardPage removed.

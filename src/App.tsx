@@ -9,7 +9,9 @@ import SearchView from "./components/SearchView";
 import Sidebar from "./components/Sidebar";
 import WeekView from "./components/WeekView";
 import AssignmentsPage from "./pages/AssignmentsPage";
-import DashboardPage from "./pages/DashboardPage";
+import ChatPanel from "./components/ChatPanel";
+import ChatCardView from "./components/ChatCards";
+import DashboardDayPanel from "./components/DashboardDayPanel";
 import FixedCommitmentsPage from "./pages/FixedCommitmentsPage";
 import MemoryPage from "./pages/MemoryPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -28,7 +30,7 @@ import { hasLocalAgent } from "./lib/agentClient";
 import { startAgentRelayHost } from "./lib/agentRelay";
 import { db } from "./lib/db";
 import { toISODate } from "../shared/datetime";
-import type { PageName, ViewName } from "./types";
+import type { ChatCard, PageName, ViewName } from "./types";
 
 export default function App() {
   const [page, setPage] = useState<PageName>("dashboard");
@@ -114,11 +116,19 @@ export default function App() {
     return startAgentRelayHost();
   }, [authLoading, user]);
   const { theme, toggle: toggleTheme } = useTheme();
-  const assistant = useAssistant(() => {
-    void refresh();
-    void refreshAssignments();
-    void refreshCommitments();
-  });
+  // Bumped whenever the assistant changes the calendar, so the Dashboard's
+  // own day column refreshes too.
+  const [calendarTick, setCalendarTick] = useState(0);
+  const assistant = useAssistant(
+    () => {
+      void refresh();
+      void refreshAssignments();
+      void refreshCommitments();
+      setCalendarTick((t) => t + 1);
+    },
+    { persist: true },
+  );
+  const renderChatCard = (card: ChatCard) => <ChatCardView card={card} assistant={assistant} />;
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-canvas text-ink">
@@ -241,18 +251,12 @@ export default function App() {
           <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} timing={assistant.lastTiming} onToggle={assistant.toggle} onSend={assistant.send} />
         </div>
       ) : page === "dashboard" ? (
-        <main id="main-scroll-dashboard" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
-          {error ? (
-            <div className="mt-11 max-w-[620px]">
-              <h1 className="text-display font-medium tracking-[-0.028em]">Can't reach your calendar.</h1>
-              <p className="mt-6 font-mono text-label tracking-gap uppercase text-grey">{error}</p>
-            </div>
-          ) : loading ? (
-            <div className="mt-11 font-mono text-label tracking-gap uppercase text-grey-ghost">Loading your day…</div>
-          ) : (
-            <DashboardPage day={day} now={now} assignments={assignments} commitments={commitments} assistantState={assistant.state} onOrbToggle={assistant.toggleConversation} caption={assistant.caption} />
-          )}
-        </main>
+        // Universal chat (center) + the selected day (right). The chat replaces
+        // the side AssistantPanel here; other pages keep it.
+        <div className="flex min-w-0 flex-1 overflow-hidden">
+          <ChatPanel assistant={assistant} renderCard={renderChatCard} />
+          <DashboardDayPanel refreshKey={calendarTick} />
+        </div>
       ) : page === "profile" ? (
         <ProfilePage />
       ) : page === "memory" ? (
