@@ -300,6 +300,34 @@ further shrink.
 - [ ] Om: download the search model (Memory page → Search model), rebuild/reload the extension,
       browse for a while, and run the eval with `--real`.
 
+### Phase 12: Phone connect fix
+Goal: the phone pairs with the typed 8-char code and stays connected to the desktop app
+(renderer on app://rocky). No schema change; live project checked: 0003 (static claim) and
+0004 (8-char check) are applied.
+- [x] Phone URL: Devices shows "On your phone, open <URL> and enter this code" with Copy.
+      URL = saved "Phone site address" (profile extra `phone_site_url`) or `VITE_PUBLIC_URL`
+      baked at build time; only http(s), never app://rocky; warns on localhost / LAN / plain http.
+      `build:win` / `build:mac` warn loudly when `VITE_PUBLIC_URL` is unset
+      (`ROCKY_REQUIRE_PUBLIC_URL=1` makes it an error) and stop on a non-http(s) value
+      (`scripts/publicUrlGuard.mjs`). **`VITE_PUBLIC_URL` must be the https Rocky website** the
+      phone opens (the phone mic needs https).
+- [x] Keys: desktop `setSecret` writes the keychain AND the shared profile row (it used to clear
+      the shared copy, so the phone never had a key); `getSecret` falls back to the shared copy;
+      one-time startup sync pushes keychain-only keys up; wipe clears both.
+- [x] Laptop stays online: `backgroundThrottling: false`, powerSaveBlocker
+      "prevent-app-suspension" while a phone is paired (released on unpair / quit), heartbeat at
+      start / focus / online / visible / wake from sleep (`power:resume`) + one retry after 3 s.
+      The phone says "Your laptop is asleep or closed. Wake it and open Rocky."
+- [x] Connection check (phone pair flow + home, collapsed, opens on failure): signed in,
+      claim_pair result with errcode, heartbeat age, realtime subscribed, keys present/missing,
+      ping round trip (relay ops `ping` / `report` on the existing `commands` rows). Laptop Devices
+      shows the phone's last seen and last ping ms.
+- [x] Code-only flow: dash / spaces / lowercase accepted; wrong code → "Wrong code", "No laptop
+      on this account" or "No code on the laptop"; Devices self-check warns with the 0004 SQL
+      when the code is 6 chars or the constraint rejects 8.
+- [ ] Om: host the web app on https (e.g. Render), set `VITE_PUBLIC_URL` to it (or paste it in
+      Devices → Change address), rebuild, and run the phone test in the report.
+
 ---
 
 ## 6. Do not build
@@ -408,3 +436,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Chat memory (`src/lib/chatMemory.ts`, local Dexie `RockyChatMemory`, this device only, never Supabase): facts the user asks Rocky to keep (planner tools remember_fact / forget_fact; same topic replaces, secrets refused) plus a running summary of conversation that has left the planner's 8-turn window, folded in the background and on Clear chat (which now clears messages, not memory). The planner reads chat_memory first every turn. Chat header: "Memory · N" lists it, with per-item ✕ and Forget everything. No migration. Installer rebuilt and reinstalled.
 - 2026-10-11: Chat memory now syncs between laptop and phone through profile `extra.chat_memory` (no migration): facts and the summary are shared, folding bookkeeping stays per device, every write reads fresh first so neither device drops the other's change, a change on one device refreshes the other's Memory list over realtime, and the laptop's earlier local-only memory is merged in once. Installer rebuilt and reinstalled.
 - 2026-10-11: Phase 11 Unified Memory: raw pages are a 24 h inbox; a background worker gists them with the local model (JSON schema, injection-safe, secrets redacted), merges reading sessions and dedupes, embeds locally (nomic-embed-text, BM25 fallback); hybrid search with a relevance threshold; monthly compaction into digests + overviews (pinned / important kept, 7-day undo, resumable, size cap); retention setting replaced by compaction (Om's call); Memory page shows tiers, storage, queue, compaction and browse-by-month; extension sends time on page. Fixture: a busy month (200 entries) compacts 11.4x. No Supabase change.
+- 2026-10-11: Phase 12 Phone connect fix: Devices shows the phone address (VITE_PUBLIC_URL or a saved "Phone site address", never app://rocky) + build guard; desktop keys now also go to the shared profile row (they were only in the keychain, so the phone had no key) with cloud fallback and a one-time sync; the desktop window isn't throttled when minimized, stays unsuspended while a phone is paired and heartbeats on focus/online/wake with a retry; phone Connection check (6 steps) and specific wrong-code messages; laptop shows the phone's last ping. No schema change.
