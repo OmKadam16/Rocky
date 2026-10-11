@@ -60,6 +60,8 @@ export type AgentView = {
   seq: number;
   /** True when the run is on another device (the phone watching the laptop). */
   remote: boolean;
+  /** Laptop: "phone" when the phone started this run (the phone does the talking). */
+  origin: "here" | "phone";
 };
 
 const IDLE: AgentView = {
@@ -76,6 +78,7 @@ const IDLE: AgentView = {
   announce: null,
   seq: 0,
   remote: false,
+  origin: "here",
 };
 
 export type AgentBackend = {
@@ -150,6 +153,8 @@ export function backend(): AgentBackend | null {
 }
 
 export const agentAvailable = () => backend() != null;
+/** True on the desktop app, where the agent window itself lives. */
+export const hasLocalAgent = () => desktop() != null;
 export const isAgentActive = () => ["starting", "running", "question", "confirm", "takeover"].includes(view.phase);
 
 /** Spoken + shown words for an event. Built in code, never by the planner. */
@@ -211,8 +216,10 @@ export function reduceAgentEvent(v: AgentView, e: AgentEvent): AgentView {
   }
 }
 
-export function applyAgentEvent(e: AgentEvent, remote = false) {
-  set({ ...reduceAgentEvent(view, e), remote });
+/** `silent` replays state without announcing it again (phone reload). */
+export function applyAgentEvent(e: AgentEvent, remote = false, silent = false) {
+  const next = reduceAgentEvent(view, e);
+  set(silent ? { ...next, remote, seq: view.seq, announce: view.announce } : { ...next, remote });
   for (const tap of eventTaps) {
     try {
       tap(e);
@@ -251,12 +258,12 @@ function ensureWired() {
 // Commands
 // ---------------------------------------------------------------------------
 
-export async function startAgent(task: AgentTask): Promise<{ ok: boolean; error?: string }> {
+export async function startAgent(task: AgentTask, origin: "here" | "phone" = "here"): Promise<{ ok: boolean; error?: string }> {
   ensureWired();
   const b = backend();
   if (!b) return { ok: false, error: "The booking agent needs the Rocky desktop app." };
   if (isAgentActive()) return { ok: false, error: "A booking is already running. Say stop to end it first." };
-  set({ ...IDLE, seq: view.seq, phase: "starting", status: "Opening page", remote: b.kind === "relay" });
+  set({ ...IDLE, seq: view.seq, phase: "starting", status: "Opening page", remote: b.kind === "relay", origin });
   try {
     const r = await b.start(task);
     if (!r?.ok) {

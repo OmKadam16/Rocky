@@ -182,7 +182,12 @@ Planner stays on `llm_key` and never reads `browser_key`. No schema change, no m
       Agent questions/results are spoken in code-built words; yes/no/stop/continue go straight to
       the agent (the planner can never approve the final click). Model picker (gpt-5.4 / -mini)
       in Profile → Model.
-- [ ] Phone relay through the existing `commands` table (short status/question text only).
+- [x] Phone relay through the existing `commands` table (no migration; `commands` is already in
+      the realtime publication). Phone sends start/answer/confirm/continue/cancel rows, laptop runs
+      them and publishes sanitized events (question, plan summary, status, reference — never
+      screenshots, page text, URLs or the step log). Relay rows are deleted within ~2 minutes.
+      Phone shows the same agent card above the talk button and speaks the questions; the laptop
+      shows the run silently when the phone started it.
 - [x] Local booking records (separate local Dexie DB `RockyBookingRecords`, never synced) +
       reference on the calendar block (title + notes); failed → "(booking failed - finish by hand)",
       cancelled → hold removed.
@@ -284,3 +289,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   instead of waiting on speech synthesis — mic turns and yes/cancel still speak.
 - 2026-10-10: Booking Agent v2 started (Phase 8): main-process computer-use core with code-enforced safety gates and limits, 35 unit tests. Not wired to the app yet.
 - 2026-10-10: Booking Agent v2 wired in: agent window (banner + Stop, capturePage, sendInputEvent, isolated-world DOM probes for the gates), IPC start/answer/confirm/continue/cancel + events, generic planner tools (find_place, propose_booking, book_appointment, answer_agent_question, continue_agent), laptop agent card + spoken questions, local evidence records. Old selector agent (`browserAgent.ts`, `browserDriver.ts`) removed. `build:electron` now runs on Windows too (`scripts/build-electron.mjs`). 128 unit tests + 15-check Electron E2E.
+- 2026-10-10: Booking Agent v2 phone relay over `commands` (no migration): phone card + spoken questions, laptop host runs the agent, sanitized events only. 131 unit tests.

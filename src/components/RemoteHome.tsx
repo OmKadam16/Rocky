@@ -5,7 +5,11 @@ import { useTheme } from "../hooks/useTheme";
 import ThemeToggle from "./ThemeToggle";
 import { useSchedule } from "../hooks/useSchedule";
 import { ensureAudioUnlocked } from "../lib/speech";
-import { supabase } from "../lib/supabase";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import { hasLocalAgent } from "../lib/agentClient";
+import { startAgentRelayClient } from "../lib/agentRelay";
+import { useAgentView } from "../hooks/useAgentView";
+import AgentCard from "./AgentCard";
 import { todayISO } from "../lib/schedule";
 import { addDays, longLabel, mondayOf, parseISODate, weekDates, WEEKDAY_SHORT } from "../../shared/datetime";
 import {
@@ -57,6 +61,11 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
   }, [selectedWeekIdx]);
   const presence = useLaptopPresence(true);
   const assistant = useAssistant(() => void refresh());
+  // Phone: the booking agent runs on the laptop; this relays to it.
+  useEffect(() => {
+    if (!isSupabaseConfigured || hasLocalAgent()) return;
+    return startAgentRelayClient();
+  }, []);
 
   const dayList = selected === today ? day.events : (week.days.find((d) => d.date === selected)?.events ?? []);
   const next = selected === today ? dayList.find((e) => e.status === "now") ?? dayList.find((e) => e.status === "upcoming") ?? null : null;
@@ -265,8 +274,10 @@ function TalkDock({
 
   // Same confirm gate as the laptop panel: the planner asks
   // "say yes or tap Confirm" before destructive tools run.
+  const agent = useAgentView();
+  const agentBusy = !["idle", "done", "failed", "cancelled"].includes(agent.phase);
   const needsConfirm = Boolean(
-    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && assistant.state === "idle",
+    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && assistant.state === "idle" && !agentBusy,
   );
   const confirm = () => {
     if (!needsConfirm) return;
@@ -293,6 +304,11 @@ function TalkDock({
       <div className="pointer-events-auto flex w-full max-w-[480px] flex-col items-center gap-2 px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3">
         {assistant.error && (
           <div className="w-full rounded-[3px] border border-line bg-card px-3 py-2 font-mono text-meta leading-[1.5] text-grey">{assistant.error}</div>
+        )}
+        {agent.phase !== "idle" && (
+          <div className="w-full">
+            <AgentCard agent={agent} onSend={(t) => void assistant.send(t)} compact />
+          </div>
         )}
         <AnimatePresence initial={false}>
           {lastReply && !replyGone && assistant.state !== "thinking" && (

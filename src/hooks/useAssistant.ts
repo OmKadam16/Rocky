@@ -312,7 +312,8 @@ export function useAssistant(onScheduleChange: () => void) {
       subscribeAgent((v) => {
         if (v.seq === lastSeq.current) return;
         lastSeq.current = v.seq;
-        if (v.announce) announceQueue.current.push(v.announce);
+        // A run the phone started is spoken on the phone; the laptop just shows it.
+        if (v.announce && !(v.origin === "phone" && !v.remote)) announceQueue.current.push(v.announce);
         if (["done", "failed", "cancelled"].includes(v.phase)) onScheduleChange();
         void flushAnnouncements();
       }),
