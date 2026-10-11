@@ -18,6 +18,7 @@ import {
   shouldReusePairCode,
 } from "../lib/pairing";
 import { detectPairClaim } from "../lib/pairClaim";
+import PhoneUrlLine from "./PhoneUrlLine";
 
 type Status = "waiting" | "confirming" | "connected" | "offline";
 
@@ -26,7 +27,7 @@ const ROTATE_TAPS_NEEDED = 5;
 const ROTATE_TAPS_WINDOW_MS = 2000;
 
 const STATUS_COPY: Record<Status, { title: string; body: string }> = {
-  waiting: { title: "Waiting for your phone", body: "Enter this code on your phone under Remote. This code is yours and doesn't change." },
+  waiting: { title: "Waiting for your phone", body: "Open the address below on your phone and enter this code. This code is yours and doesn't change." },
   confirming: { title: "Phone found", body: "Finishing pairing…" },
   connected: { title: "You're connected", body: "Your phone is paired. Say something on your phone to test it." },
   offline: { title: "Can't reach the relay", body: "Check your connection and retry." },
@@ -292,6 +293,7 @@ export default function DevicesSection() {
           <div className="mt-3 font-mono text-[11px] text-grey">Preparing your code…</div>
         ) : (
           <>
+            <PhoneUrlLine />
             <div className="mt-3 flex items-center justify-center gap-3">
               <button
                 type="button"
@@ -310,7 +312,7 @@ export default function DevicesSection() {
               </button>
             </div>
             <div className="mt-2 text-center font-mono text-[10.5px] text-grey-soft">
-              Enter this code on your phone under Remote. This laptop is named{" "}
+              This laptop is named{" "}
               <input
                 value={laptopName}
                 onChange={(e) => setLaptopName(e.target.value.slice(0, 40))}
