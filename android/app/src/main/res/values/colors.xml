@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- --color-canvas / --color-ink from src/index.css (light). -->
+    <!-- Canvas and ink colours from src/index.css (light theme). -->
     <color name="rocky_canvas">#F4F3F0</color>
     <color name="rocky_ink">#17191A</color>
     <color name="colorPrimary">#17191A</color>
