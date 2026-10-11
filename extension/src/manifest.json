@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Rocky Memory",
+  "version": "0.1.0",
+  "description": "Saves pages you read to Rocky's Memory on this computer. Nothing leaves your laptop.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw7TG0gdMe/OBLjip8FjF8tzRpdqm5WFi/usyf1eijsCkZH6gu1QSbozUGBsSbMSoAqd0ZEWAzkFgGWksZT2vHmGDsa9wWrTS96g+61NbYRKrJb0/Yy9Rzm8ZMFM/uVSDwrg9ggPEZDwXTq2H7zAyvSkC4P/88AYfx3r6LXeVd2kDpXlr07j08Mbhsu3axe8qXW0I1RUVXziaehHFeWvw8aoSMd02JDulK6Iip91G68vo5QJyQMdiYiLqqsZ23cZ/u1geyAo+LubI/aKCQutmhWVkZfnlMF49aGJdoFwrcltb2wl9ka37Wbj7hObBqSzbrw/e9cnb+KNnzoDak777iwIDAQAB",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Rocky Memory",
+    "default_icon": {
+      "16": "icon.png",
+      "32": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "incognito": "not_allowed",
+  "minimum_chrome_version": "116"
+}

@@ -1,0 +1,39 @@
+/* Rocky's tokens (see src/index.css), kept minimal. */
+:root {
+  --canvas: #f4f3f0;
+  --card: #ffffff;
+  --ink: #17191a;
+  --grey: #8b887f;
+  --line: #e2dfd8;
+  --accent: #3f9e7c;
+  --warm: #b07a3c;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --canvas: #17191a; --card: #1f2122; --ink: #f4f3f0; --grey: #a5a29a; --line: #2e3133; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 300px; padding: 16px; background: var(--canvas); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.label { font: 600 11px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grey); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.dot.on { background: var(--accent); }
+.big { font-size: 20px; font-weight: 500; }
+.muted { color: var(--grey); font-size: 12.5px; margin: 6px 0 12px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.between { justify-content: space-between; }
+section { display: flex; flex-direction: column; gap: 8px; }
+input[type="password"], input[type="number"] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--card); color: var(--ink); font: inherit; }
+input[type="number"] { width: 90px; }
+button { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--ink); font: 12px/1 ui-monospace, Menlo, Consolas, monospace; }
+button:hover { border-color: var(--ink); }
+button.primary { background: var(--ink); color: var(--canvas); border-color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 500; }
+button.primary:hover { background: var(--accent); border-color: var(--accent); }
+.wide { width: 100%; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--grey); }
+.box { border: 1px solid var(--line); border-radius: 4px; padding: 10px; background: var(--card); }
+.box .muted { margin-top: 0; }
+.link { border: 0; padding: 4px 0; color: var(--grey); text-align: left; }
+.link:hover { color: var(--ink); }
+.msg { min-height: 18px; margin: 12px 0 0; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--grey); }
+.msg.warn { color: var(--warm); }

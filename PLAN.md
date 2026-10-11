@@ -245,7 +245,7 @@ code does the search.
       verified, no native build) in userData. Retention (default 90 days) + size cap.
 - [x] Ingest server on 127.0.0.1 only, POST /ingest, pairing token + extension Origin check,
       body cap, no CORS wildcard; runs only while the app runs and Memory is on.
-- [ ] Chrome MV3 extension (`extension/`, `npm run build:extension` → `extension/dist`):
+- [x] Chrome MV3 extension (`extension/`, `npm run build:extension` → `extension/dist`):
       capture on tab complete via the service worker + `chrome.scripting` (no static
       content script); automatic capture needs the user to grant optional host access in the
       popup, otherwise only "Save this page now" (`activeTab`). Exclusions, pause, no incognito,
@@ -354,3 +354,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Phase 9 started: Dashboard is now Sidebar | universal chat | selected day (chat-only under 1100px), chat history in a local-only Dexie DB (last 200, Clear chat), private turns never reach the cloud planner. Old DashboardPage removed.
 - 2026-10-10: Phase 9 done: commitments by chat (propose → confirm card, code-enforced confirm), receipts with Undo for the last action, booking card inline in the chat.
 - 2026-10-10: Phase 10 part 1: Memory store (`electron/memoryStore.cjs`, node:sqlite FTS5/BM25, dedupe, default + user exclusions, retention, size cap, screenshots on disk with a cap), code-side query parser (`memoryQuery.cjs`: today/yesterday/last week/on Tuesday/this morning/in September…), local answers (`memoryAnswer.cjs`, Ollama only, searches answered in code), 127.0.0.1 ingest server (`memoryServer.cjs`: pinned extension Origin, Host check, token, body cap, no CORS wildcard) and IPC (`memoryMain.cjs`). 22 tests incl. real HTTP and a privacy test (no cloud imports, only 127.0.0.1 peers, no logging).
+- 2026-10-10: Phase 10 part 2: Rocky Memory Chrome extension (MV3, plain JS, no deps). Fixed ID `jdnejbolgdoclegdleaaddghjbgbdidh` from a public key in the manifest (the server pins that Origin; the build fails if they differ). Permissions: storage, activeTab, scripting, alarms + host 127.0.0.1 only; automatic capture is an optional all-sites grant from the popup. Popup: connect with token, On/Pause, Save this page now (+ optional screenshot), Don't save this site, saved count. Extractor tested in real Chromium (`npm run test:extract-e2e`, 6/6).

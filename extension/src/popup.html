@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rocky Memory</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="label">Rocky Memory</span>
+    <span id="dot" class="dot" title="Connection"></span>
+  </header>
+
+  <section id="connect" hidden>
+    <p class="muted">Paste the pairing token from Rocky → Memory.</p>
+    <input id="token" type="password" placeholder="Pairing token" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <input id="port" type="number" min="1024" max="65535" placeholder="47821">
+      <button id="connectBtn" class="primary">Connect to Rocky</button>
+    </div>
+  </section>
+
+  <section id="main" hidden>
+    <div class="row between">
+      <span id="state" class="big">On</span>
+      <button id="pauseBtn">Pause</button>
+    </div>
+    <p id="count" class="muted"></p>
+    <button id="saveBtn" class="primary wide">Save this page now</button>
+    <label class="check"><input id="shot" type="checkbox"> Include a screenshot</label>
+    <button id="excludeBtn" class="wide">Don't save this site</button>
+    <div id="auto" class="box" hidden>
+      <p class="muted">Automatic saving is off. Without it, only “Save this page now” works.</p>
+      <button id="grantBtn" class="wide">Save pages automatically</button>
+    </div>
+    <button id="relink" class="link">Change pairing token</button>
+  </section>
+
+  <p id="msg" class="msg"></p>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

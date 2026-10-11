@@ -35,7 +35,7 @@ const DEFAULT_EXCLUDED = [
   "mychart.com", "myhealth.va.gov", "patient.info",
 ];
 /** Hostname words that mark a category (bank, health portal, login…). */
-const EXCLUDED_WORDS = /(^|[.-])(bank|banking|netbanking|ebanking|mychart|patientportal|healthportal|login|signin|auth|sso|webmail|mail)([.-]|$)/;
+const EXCLUDED_WORDS = /(^|[.-])(bank|banking|netbanking|ebanking|mychart|patientportal|healthportal|login|signin|auth|sso|webmail|mail)([.-]|$)|bank/;
 
 const domainOf = (url) => {
   try {
@@ -277,4 +277,4 @@ function createMemoryStore({ file = ":memory:", shotsDir = null, now = () => Dat
   return { ingest, search, list, remove, clear, stats, prune, settings, setSettings, close: () => db.close() };
 }
 
-module.exports = { createMemoryStore, isExcluded, domainOf, DEFAULT_EXCLUDED, MAX_TEXT };
+module.exports = { createMemoryStore, isExcluded, domainOf, DEFAULT_EXCLUDED, EXCLUDED_WORDS, MAX_TEXT };

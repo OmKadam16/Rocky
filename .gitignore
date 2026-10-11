@@ -19,3 +19,5 @@ tsconfig.tsbuildinfo
 Voice Calendar*.html
 *.zip
 landing/
+# Built Chrome extension (npm run build:extension)
+extension/dist

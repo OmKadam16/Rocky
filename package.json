@@ -15,7 +15,9 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "test:agent-e2e": "electron electron/test/agentE2E.cjs",
-    "build:win": "npm run build:electron && electron-builder --win --publish never"
+    "build:win": "npm run build:electron && electron-builder --win --publish never",
+    "build:extension": "node scripts/build-extension.mjs",
+    "test:extract-e2e": "electron electron/test/extractE2E.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
