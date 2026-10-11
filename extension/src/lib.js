@@ -48,6 +48,12 @@ export const originPattern = (url) => {
   }
 };
 
+/** Seconds of active reading for one segment (0 if too short), capped at 4 hours. */
+export function visitSeconds(since, now = Date.now()) {
+  const s = Math.round((now - Number(since)) / 1000);
+  return Number.isFinite(s) && s >= 3 ? Math.min(s, 4 * 3600) : 0;
+}
+
 /** Small offline queue: newest kept, screenshots dropped to stay small. */
 export function enqueue(queue, item) {
   const { screenshot: _drop, ...small } = item;

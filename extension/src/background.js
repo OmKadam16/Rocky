@@ -5,7 +5,7 @@
 // and the page isn't excluded. No content script runs anywhere by default;
 // the extractor below is injected with chrome.scripting only into allowed
 // pages. Pages go to Rocky's local server on 127.0.0.1 and nowhere else.
-import { DEFAULT_PORT, cleanText, enqueue, originPattern, seenRecently, shouldCapture } from "./lib.js";
+import { DEFAULT_PORT, cleanText, enqueue, originPattern, seenRecently, shouldCapture, visitSeconds } from "./lib.js";
 import { extractPage } from "./extract.js";
 
 const get = (keys) => chrome.storage.local.get(keys);
@@ -28,17 +28,18 @@ async function sha(s) {
   return [...new Uint8Array(buf)].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function post(item) {
+async function post(item, route = "/ingest") {
   const c = await config();
   if (!c.token) return { ok: false, reason: "not_connected" };
   let res;
   try {
-    res = await fetch(`${server(c.port)}/ingest`, {
+    res = await fetch(`${server(c.port)}${route}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${c.token}`, "Content-Type": "application/json", "X-Rocky-Extension": chrome.runtime.id },
       body: JSON.stringify(item),
     });
   } catch {
+    if (route !== "/ingest") return { ok: false, reason: "offline" }; // time on page isn't worth queueing
     // Rocky isn't running: keep a few items and retry later.
     const { queue = [] } = await get(["queue"]);
     await set({ queue: enqueue(queue, item) });
@@ -48,13 +49,13 @@ async function post(item) {
     await set({ connected: false });
     return { ok: false, reason: "not_paired" };
   }
-  if (res.status >= 500) {
+  if (res.status >= 500 && route === "/ingest") {
     const { queue = [] } = await get(["queue"]);
     await set({ queue: enqueue(queue, item) });
     return { ok: false, reason: "queued" };
   }
   const body = await res.json().catch(() => ({}));
-  if (body.ok && !body.deduped) {
+  if (route === "/ingest" && body.ok && !body.deduped) {
     const { saved = 0 } = await get(["saved"]);
     await set({ saved: saved + 1, connected: true });
   }
@@ -86,11 +87,50 @@ async function capture(tab, { manual = false, screenshot = null } = {}) {
   const s = seenRecently(recent, key);
   if (s.seen && !manual) return { ok: true, reason: "duplicate" };
   await set({ recent: { ...s.recent, [key]: Date.now() } });
-  return post({ url: page.url, title: page.title, text, ...(screenshot ? { screenshot } : {}) });
+  // "Save this page" is pinned in Rocky (and may carry a thumbnail).
+  return post({ url: page.url, title: page.title, text, ...(manual ? { manual: true } : {}), ...(screenshot ? { screenshot } : {}) });
+}
+
+// ---- time on page ------------------------------------------------------------
+// Only the active tab of the focused window counts. A segment starts when a
+// saved site becomes active and ends on switching away, navigating, closing
+// or losing focus; Rocky adds the seconds to that page's memory.
+
+async function endSegment() {
+  const { active } = await chrome.storage.session.get(["active"]);
+  if (!active) return;
+  await chrome.storage.session.remove("active");
+  const seconds = visitSeconds(active.since);
+  if (seconds) await post({ url: active.url, seconds }, "/visit");
+}
+
+async function beginSegment(tab) {
+  await endSegment();
+  if (!tab || tab.incognito || !tab.id || !tab.url) return;
+  const c = await config();
+  if (!c.token || c.paused || !shouldCapture(tab.url, c.excluded)) return;
+  const origin = originPattern(tab.url);
+  if (!origin || !(await chrome.permissions.contains({ origins: [origin] }))) return;
+  await chrome.storage.session.set({ active: { tabId: tab.id, url: tab.url, since: Date.now() } });
 }
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === "complete") void capture({ ...tab, id: tabId });
+  if (info.status === "complete") {
+    void capture({ ...tab, id: tabId });
+    if (tab.active) void beginSegment({ ...tab, id: tabId });
+  }
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void chrome.tabs.get(tabId).then(beginSegment, () => endSegment());
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void chrome.storage.session.get(["active"]).then(({ active }) => {
+    if (active && active.tabId === tabId) void endSegment();
+  });
+});
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) void endSegment();
+  else void chrome.tabs.query({ active: true, windowId }).then(([tab]) => beginSegment(tab));
 });
 
 async function flushQueue() {

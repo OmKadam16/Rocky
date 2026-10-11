@@ -65,3 +65,13 @@ describe("minimal permissions", () => {
     }
   });
 });
+
+describe("time on page", () => {
+  it("counts seconds of a reading segment, ignores blips, caps at 4 hours", async () => {
+    const { visitSeconds } = await import("./src/lib.js");
+    expect(visitSeconds(0, 2000)).toBe(0);
+    expect(visitSeconds(0, 95_000)).toBe(95);
+    expect(visitSeconds(0, 10 * 3600 * 1000)).toBe(4 * 3600);
+    expect(visitSeconds("bad", 5000)).toBe(0);
+  });
+});
