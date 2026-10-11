@@ -375,6 +375,48 @@ start and every minute. Memory itself (pages, gists, vectors) never leaves the l
 - [ ] Om: deploy the web build where the phone loads it (Render), refresh the phone, run the
       manual test in the report.
 
+### Phase 15: Android app (Capacitor)
+Goal: the phone UI as a real Android app (same code, same login, same tabs). No schema change.
+- [x] Capacitor 8 (`capacitor.config.ts`): appId `com.rocky.calendar.android` (debug builds add
+      `.debug`), webDir `dist`, androidScheme https (origin https://localhost). The app always
+      boots into the phone UI (`shouldShowMobileUi`). Web and desktop builds unchanged
+      (`CAPACITOR=1` only switches the asset base).
+- [x] `android/` in git (no local.properties, keystores or build output), Gradle wrapper 8.14.3,
+      AGP 8.13, Kotlin 2.2.20, minSdk 24, target/compile 36. Icons (adaptive) and light/dark
+      splash from build/icon.png (`node scripts/android-icons.mjs`); bar icons follow the theme.
+- [x] Permissions: INTERNET, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, REQUEST_INSTALL_PACKAGES (updater).
+      Mic via Capacitor's WebChromeClient; spoken replies play without a second tap. Voice already
+      uses recorded audio + ElevenLabs STT (no Web Speech API anywhere).
+- [x] allowBackup false + data-extraction rules, no cleartext, release not debuggable, WebView
+      debugging off. Supabase session in Android Keystore-backed storage
+      (@aparajita/capacitor-secure-storage); API keys aren't stored on the phone (read from the
+      profile row when needed).
+- [x] Email links: `com.rocky.calendar.android://auth` deep link → PKCE code exchange
+      (Supabase redirect URL to add by hand). Back button (settings → Chat → Calendar → leave),
+      resume (session, realtime, calendar refresh), offline banner, screen kept on only during a
+      booking run, safe areas via --safe-area-inset-*, no zoom/overscroll.
+- [x] Pairing exactly as the phone site; Devices notes the app needs only the code.
+- [x] `npm run build:android` (debug), `npm run build:android:release` (keystore from env /
+      gradle properties, `scripts/android-keystore.md`); CI debug APK on every push
+      (`.github/workflows/android-build.yml`). Version: package.json → versionName, versionCode
+      = x*10000 + y*100 + z.
+
+### Phase 16: Auto-update
+- [x] Desktop: "Check automatically on start and every 6 hours, download in the background, ask
+      before restarting" (profile extra `desktop_auto_update`, default on); unsigned NSIS
+      (no publisherName → no signature check; full downloads, no differential); clear message
+      when Windows refuses. `release-desktop.yml` on tag `v*` → `OmKadam16/rocky-releases`.
+- [x] Android web layer over the air: @capgo/capacitor-updater in manual mode (no capgo cloud,
+      stats off), SHA-256 checked, applied on next launch, rollback when the bundle doesn't call
+      notifyAppReady in 10 s, failed versions never retried, `minNativeVersion` gating, check on
+      start/foreground at most every 6 h, "Updated to x.y.z" once (`src/lib/appUpdate*.ts`).
+- [x] Android APK: "Update available (x.y.z, N MB)" card, download + SHA-256 in Kotlin
+      (`RockyApkUpdaterPlugin`), FileProvider → Android's installer (never silent).
+- [x] `release-android.yml` on tag `android-v*` → APK + dist.zip + android-update.json in
+      `OmKadam16/rocky-android-releases`. Docs: `docs/RELEASING.md`.
+- [ ] Om: create both releases repos, RELEASES_REPO_TOKEN and build secrets, run keytool once,
+      add the Supabase redirect URL, publish the first releases, then set UPDATES_ENABLED = true.
+
 ---
 
 ## 6. Do not build
@@ -488,3 +530,5 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Network errors are named and retried: voice-to-text, voice reply, calendar reads and the planner each retry once on a network blip and say which service dropped instead of "Failed to fetch"; a small local error log (service + browser message, no user text) shows in the vc-debug readout.
 - 2026-10-11: 12-hour clock in replies: the prompt teaches "8 AM / 12 PM / 8 to 10 PM" both ways (user commands in, replies out), the calendar glance shows each time's spoken form, and every assistant reply (on screen and spoken, laptop and phone) passes through `speakableTimes` so no 24-hour time or ISO date reaches the user.
 - 2026-10-11: Phase 14 Phone: Chat + Calendar tabs (bottom tab bar, floating mic + reply toast + pending cards on Calendar, full chat with cards and composer, keyboard-aware), phone chat history without private turns, Memory questions from the phone answered on the laptop through one transient relay row (deleted after reading, purged after 2 min), "Allow Memory questions from my phone" toggle. No schema change.
+- 2026-10-11: Phase 15 Android app (Capacitor 8): same web build in the phone UI, mic + spoken replies in the WebView, Keystore-backed session, deep-link email links, back button / resume / offline banner, icons + light/dark splash, debug + signed release builds, CI debug APK. No schema change.
+- 2026-10-11: Phase 16 Auto-update: desktop checks on start and every 6 h (download in background, ask before restart; unsigned NSIS, full downloads) + release-desktop.yml; Android OTA web bundles (SHA-256, rollback, minNativeVersion) + APK update card via the package installer + release-android.yml.
