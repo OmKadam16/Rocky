@@ -241,9 +241,9 @@ Goal: one chat on the Dashboard handles commitments, calendar/tasks, bookings an
 Goal: "what did I read about X" works from pages the user actually visited; nothing leaves
 the laptop. Model: Ollama `qwen3.5:2b` (think:false, temperature 0.1) only writes the answer;
 code does the search.
-- [ ] Store in the Electron main process: `node:sqlite` (built into Electron 44, FTS5 + BM25
+- [x] Store in the Electron main process: `node:sqlite` (built into Electron 44, FTS5 + BM25
       verified, no native build) in userData. Retention (default 90 days) + size cap.
-- [ ] Ingest server on 127.0.0.1 only, POST /ingest, pairing token + extension Origin check,
+- [x] Ingest server on 127.0.0.1 only, POST /ingest, pairing token + extension Origin check,
       body cap, no CORS wildcard; runs only while the app runs and Memory is on.
 - [ ] Chrome MV3 extension (`extension/`, `npm run build:extension` → `extension/dist`):
       capture on tab complete via the service worker + `chrome.scripting` (no static
@@ -353,3 +353,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Booking Agent v2 speed, reassurance and OTP: per-step timing + run summary (debug readout); event-based settle, JPEG shots, pre-opened start page, planner-free answers, TTS prefetch (local overhead per acting step on the E2E fixture ~594ms → ~350-410ms; model time not measurable here, see report); spoken progress updates with the new Profile → Voice setting (no migration); booking-contact verification codes typed by code, never stored or relayed. 174 unit tests + 28-check E2E. Installer rebuilt and reinstalled.
 - 2026-10-10: Phase 9 started: Dashboard is now Sidebar | universal chat | selected day (chat-only under 1100px), chat history in a local-only Dexie DB (last 200, Clear chat), private turns never reach the cloud planner. Old DashboardPage removed.
 - 2026-10-10: Phase 9 done: commitments by chat (propose → confirm card, code-enforced confirm), receipts with Undo for the last action, booking card inline in the chat.
+- 2026-10-10: Phase 10 part 1: Memory store (`electron/memoryStore.cjs`, node:sqlite FTS5/BM25, dedupe, default + user exclusions, retention, size cap, screenshots on disk with a cap), code-side query parser (`memoryQuery.cjs`: today/yesterday/last week/on Tuesday/this morning/in September…), local answers (`memoryAnswer.cjs`, Ollama only, searches answered in code), 127.0.0.1 ingest server (`memoryServer.cjs`: pinned extension Origin, Host check, token, body cap, no CORS wildcard) and IPC (`memoryMain.cjs`). 22 tests incl. real HTTP and a privacy test (no cloud imports, only 127.0.0.1 peers, no logging).

@@ -479,6 +479,7 @@ app.whenReady().then(async () => {
   registerAppProtocol();
   registerSecretHandlers();
   registerBrowserHandlers();
+  require("./memoryMain.cjs").registerMemory();
   registerShell();
   registerUpdates();
   const session = require("electron").session.defaultSession;

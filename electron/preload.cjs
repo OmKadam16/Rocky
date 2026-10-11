@@ -48,6 +48,16 @@ contextBridge.exposeInMainWorld("rocky", {
       return () => ipcRenderer.removeListener("agent:event", listener);
     },
   },
+  memory: {
+    /** Local Memory (Electron main only): settings, saved pages, questions. */
+    status: () => ipcRenderer.invoke("memory:status"),
+    set: (patch) => ipcRenderer.invoke("memory:set", patch),
+    list: (opts) => ipcRenderer.invoke("memory:list", opts),
+    remove: (id) => ipcRenderer.invoke("memory:delete", id),
+    clear: () => ipcRenderer.invoke("memory:clear"),
+    ask: (question) => ipcRenderer.invoke("memory:ask", question),
+    open: (url) => ipcRenderer.invoke("memory:open", url),
+  },
   ollama: {
     installOfficial: (platform) => ipcRenderer.invoke("ollama:installOfficial", platform),
     onInstallProgress: (handler) => {
