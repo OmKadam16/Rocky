@@ -26,17 +26,22 @@ vi.mock("./bookingTask", async (orig) => {
     },
   };
 });
+const started = vi.hoisted(() => ({ tasks: [] as unknown[] }));
 vi.mock("./agentClient", () => ({
   agentAvailable: () => true,
   getAgentView: () => ({ phase: "idle" }),
   isAgentActive: () => false,
-  startAgent: async () => ({ ok: true }),
+  startAgent: async (t: unknown) => {
+    started.tasks.push(t);
+    return { ok: true };
+  },
   answerAgent: async () => true,
   continueAgent: async () => true,
   prepareAgent: () => {},
 }));
 
-import { resetBookingState, runBookingTool, samePlace, type CalendarHelpers } from "./bookingTools";
+import { resetBookingState, runBookingTool, samePlace, startPendingBooking, type CalendarHelpers } from "./bookingTools";
+import { isGoAhead } from "./bookingTask";
 
 function calendar() {
   const blocks: ScheduledBlockRow[] = [];
@@ -66,6 +71,7 @@ const propose = (args: Record<string, unknown>, userText: string, cal: CalendarH
 beforeEach(() => {
   resetBookingState();
   profile.facts = {};
+  started.tasks = [];
 });
 
 describe("the Nobu transcript: nothing the user said is lost or asked twice", () => {
@@ -116,5 +122,44 @@ describe("the Nobu transcript: nothing the user said is lost or asked twice", ()
     expect(samePlace("Nobu", "Nobu Newport Beach")).toBe(true);
     expect(samePlace("nobu newport", "Nobu")).toBe(true);
     expect(samePlace("Nobu", "Din Tai Fung")).toBe(false);
+  });
+});
+
+describe("the second Nobu chat: a go-ahead to the read-back starts the agent in code", () => {
+  const FULL = { type: "restaurant", venue: "Nobu Newport Beach", area: "Newport Beach", date: "2099-10-13", start_time: "20:30", party_size: 3, first_name: "Om", last_name: "Kadam", phone: "5628506835", email: "om4kadam@gmail.com", occasion: "none" };
+
+  it("'Yes, make the appointment' right after the plan starts the agent once, no planner", async () => {
+    const { cal } = calendar();
+    const plan = await propose(FULL, "", cal);
+    const readBack = String(plan.summary);
+    expect(readBack).toMatch(/Say yes or tap Confirm and I'll start/);
+    const reply = await startPendingBooking("Yes, make the appointment", readBack);
+    expect(reply).toMatch(/^On it/);
+    expect(started.tasks).toHaveLength(1);
+    expect(started.tasks[0]).toMatchObject({ venue: "Nobu Newport Beach", firstName: "Om", phone: "5628506835", email: "om4kadam@gmail.com" });
+    // A second yes doesn't start a second run.
+    expect(await startPendingBooking("yes", readBack)).toBe(null);
+    expect(started.tasks).toHaveLength(1);
+  });
+
+  it("a yes that isn't straight after the read-back, or that changes the plan, is the planner's", async () => {
+    const { cal } = calendar();
+    const plan = await propose(FULL, "", cal);
+    expect(await startPendingBooking("yes", "Delete Gym tomorrow? Say yes or tap Confirm")).toBe(null);
+    expect(await startPendingBooking("yes but make it 9", String(plan.summary))).toBe(null);
+    expect(await startPendingBooking("no", String(plan.summary))).toBe(null);
+    expect(started.tasks).toHaveLength(0);
+  });
+
+  it("book_appointment accepts a natural yes too", async () => {
+    const { cal } = calendar();
+    const plan = await propose(FULL, "", cal);
+    const r = (await runBookingTool("book_appointment", { hold_block_id: plan.hold_block_id, confirmed: true }, { userText: "Yes, make the appointment" }, cal)) as Record<string, unknown>;
+    expect(r.status).toBe("started");
+  });
+
+  it("go-ahead wording", () => {
+    for (const t of ["yes", "Yes, make the appointment", "just book it", "go ahead", "Just use it", "sure, book it", "yeah do it", "sounds good"]) expect(isGoAhead(t)).toBe(true);
+    for (const t of ["no", "yes but at 9", "make it 4 people", "wait", "actually change the time", "what time is it?", "not now"]) expect(isGoAhead(t)).toBe(false);
   });
 });

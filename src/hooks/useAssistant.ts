@@ -7,6 +7,7 @@ import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 import { commitmentCardFromTools, pendingProposalId } from "../lib/chatCards";
+import { startPendingBooking } from "../lib/bookingTools";
 import { cancelProposal, commitmentReply, confirmProposal, receiptText } from "../lib/commitmentProposals";
 import { beginCapture, endCapture, registerUndo, runUndo } from "../lib/undoJournal";
 import { isMemoryQuestion, memoryCardFor, takeMemoryCard } from "../lib/memoryIntent";
@@ -268,6 +269,18 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
           if (speakReply) {
             setState("speaking");
             await speak(card.answer).catch(() => {});
+          }
+          return;
+        }
+        // A go-ahead to the booking plan Rocky just read back starts the agent
+        // here, in code: the planner kept re-reading the plan instead.
+        const lastSaid = [...turnsRef.current.slice(0, -1)].reverse().find((t) => t.role === "assistant" && t.text)?.text ?? null;
+        const bookingStart = await startPendingBooking(text, lastSaid);
+        if (bookingStart) {
+          push({ role: "assistant", text: bookingStart });
+          if (speakReply) {
+            setState("speaking");
+            await speak(bookingStart).catch(() => {});
           }
           return;
         }

@@ -364,6 +364,20 @@ const CONTINUE = /^\s*(continue|carry on|go on|keep going|resume|done|i'?m done|
 
 export const isExplicitYes = (text: string | null | undefined) => YES.test(String(text ?? ""));
 export const isExplicitNo = (text: string | null | undefined) => NO.test(String(text ?? "")) && !YES.test(String(text ?? ""));
+/**
+ * A go-ahead to something Rocky just read back: "yes", "yes, make the
+ * appointment", "just book it", "go ahead and reserve it", "just use it".
+ * Anything that changes or doubts the plan ("yes but at 9", "no", "for 4",
+ * "wait") is not one, and goes to the planner instead.
+ */
+export function isGoAhead(text: string | null | undefined): boolean {
+  const t = String(text ?? "").toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 80) return false;
+  if (/\b(no|nope|nah|not|don'?t|but|change|instead|actually|wait|different|another|cancel|stop|later|earlier|hold on|rather|except)\b|\d/.test(t)) return false;
+  if (YES.test(t)) return true;
+  return /^(yes|yeah|yep|yup|sure|ok|okay|alright|please|just|go ahead|go for it|do it|go|book|make|reserve|start|confirm|confirmed|sounds good|perfect|correct|that's right|thats right|let's do it|lets do it|use it)\b/.test(t);
+}
+
 export const isStop = (text: string | null | undefined) => STOP.test(String(text ?? ""));
 export const isContinue = (text: string | null | undefined) => CONTINUE.test(String(text ?? ""));
 

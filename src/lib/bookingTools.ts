@@ -23,7 +23,7 @@ import {
   TASK_TYPES,
   buildHoldTitle,
   formatPlan,
-  isExplicitYes,
+  isGoAhead,
   knownFacts,
   fillKnown,
   missingSlots,
@@ -152,13 +152,43 @@ let building: BookingDraft | null = null;
 let pendingSuggestion: { slot: SlotKey; value: string } | null = null;
 /** The plan last read back: "yes" on the next turn means this one. */
 let lastProposedHold: string | null = null;
+/** A complete plan was read back and nothing has started it yet. */
+let planPending: string | null = null;
 
 export function resetBookingState() {
   drafts.clear();
   building = null;
   pendingSuggestion = null;
   lastProposedHold = null;
+  planPending = null;
 }
+
+/** Start the agent on a plan, once. Shared by book_appointment and the code fast path. */
+async function startPlan(holdId: string, d: BookingDraft) {
+  planPending = null;
+  return startAgent(toAgentTask(d, holdId));
+}
+
+/**
+ * The user said go ahead to the plan Rocky just read back. Starts the agent
+ * in code, with no planner round trip (the planner kept re-reading the plan
+ * instead of starting). Null = not a go-ahead to a pending plan: the planner
+ * takes the turn as usual.
+ */
+export async function startPendingBooking(userText: string, lastAssistantText: string | null): Promise<string | null> {
+  const holdId = planPending;
+  const d = holdId ? drafts.get(holdId) : null;
+  if (!holdId || !d || !isGoAhead(userText)) return null;
+  // Only straight after the read-back: a later "yes" answers something else.
+  const readBack = Boolean(lastAssistantText && (lastAssistantText.includes(formatPlan(d)) || (/I'll start/.test(lastAssistantText) && d.venue && lastAssistantText.includes(d.venue))));
+  if (!readBack) return null;
+  if (!agentAvailable()) return null; // the planner hands over the link instead
+  const started = await startPlan(holdId, d);
+  if (!started.ok) return `I couldn't start the booking agent: ${String(started.error || "unknown error").replace(/[.\s]+$/, "")}. The time is still held on your calendar.`;
+  return `On it. I'm booking ${d.venue ?? "it"} now in the agent window, and I'll only ask you if the site wants something I don't have.`;
+}
+
+export const hasPendingBookingPlan = () => planPending != null;
 
 const text = (v: unknown) => {
   const s = typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
@@ -218,7 +248,7 @@ function draftFrom(args: Record<string, unknown>, prior: BookingDraft | null): B
 function applySuggestion(d: BookingDraft, userText: string | undefined): BookingDraft {
   const s = pendingSuggestion;
   pendingSuggestion = null;
-  if (!s || !isExplicitYes(userText)) return d;
+  if (!s || !isGoAhead(userText)) return d;
   const next = { ...d };
   if (s.slot === "email" && !next.email) next.email = s.value;
   if (s.slot === "phone" && !next.phone) next.phone = s.value;
@@ -264,6 +294,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       // (or the next booking) never asks again.
       void rememberFacts({ phone: d.phone, city: d.area, firstName: d.firstName, lastName: d.lastName, email: d.email });
       const missing = missingSlots(d);
+      planPending = null;
       if (missing.length > 0) {
         const q = nextQuestion(d, known);
         if (q?.suggestion) pendingSuggestion = { slot: q.slot, value: q.suggestion };
@@ -308,6 +339,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       drafts.set(holdId, d);
       building = d;
       lastProposedHold = holdId;
+      planPending = holdId;
       // Load the booking page while the plan is read back; the run itself
       // still waits for the yes (book_appointment).
       if (agentAvailable()) prepareAgent(toAgentTask(d, holdId));
@@ -330,7 +362,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
         return { needs_confirmation: true, preview: `${formatPlan(d)}` };
       }
       // Confirmation #1, checked against the user's own words, not the model's.
-      if (!isExplicitYes(ctx.userText)) {
+      if (!isGoAhead(ctx.userText)) {
         return { error: "The user hasn't said yes to the plan this turn. Read the plan back and wait for an explicit yes. Do not start the booking." };
       }
       if (!agentAvailable()) {
@@ -341,7 +373,7 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
           instruction: "No agent here (the laptop app isn't connected). Give the user the link to finish by hand; the hold stays on their calendar. Never say it's booked.",
         };
       }
-      const started = await startAgent(toAgentTask(d, holdId));
+      const started = await startPlan(holdId, d);
       if (!started.ok) return { status: "not_started", reason: started.error, hold_block_id: holdId };
       return {
         status: "started",
