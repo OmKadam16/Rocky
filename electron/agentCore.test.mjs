@@ -468,6 +468,33 @@ describe("computer actions -> sendInputEvent", () => {
   });
 });
 
+describe("Responses API input rules", () => {
+  // Real API error (2026-10-10 Nobu run): "Computer tool only allows input
+  // image without previous response". After the first request, screenshots
+  // may only travel as computer_call_output.
+  const plainImagesAfterFirst = (bodies) =>
+    bodies.slice(1).flatMap((b) => b.input).filter((i) => i.role && (i.content || []).some((c) => c.type === "input_image"));
+
+  it("after open_url: no plain input_image, the model is asked to take a screenshot", async () => {
+    const h = harness({ script: [fc("open_url", { url: "https://nobu.example/newport" }), cc({ type: "screenshot" }), fc("give_up", { reason: "x" })] });
+    await h.run.start();
+    expect(h.page.url).toBe("https://nobu.example/newport");
+    expect(plainImagesAfterFirst(h.bodies)).toEqual([]);
+    expect(JSON.stringify(h.bodies[1].input)).toMatch(/Take a screenshot/);
+    expect(h.bodies[2].input[0]).toMatchObject({ type: "computer_call_output", output: { type: "computer_screenshot" } });
+  });
+
+  it("after a handoff is continued: still no plain input_image", async () => {
+    const h = harness({ script: [fc("handoff_to_user", { reason: "login", message: "Sign in please." }), fc("give_up", { reason: "x" })] });
+    await h.run.start();
+    h.run.continueRun();
+    await h.run.current;
+    expect(plainImagesAfterFirst(h.bodies)).toEqual([]);
+    expect(h.bodies[0].previous_response_id).toBeUndefined();
+    expect(h.bodies[0].input[0].content.some((c) => c.type === "input_image")).toBe(true);
+  });
+});
+
 describe("task + tools", () => {
   it("whitelists the task and pins model + http(s)", () => {
     const t = normalizeTask({ ...TASK, startUrl: "javascript:alert(1)", model: "gpt-4o", evil: 1, details: { partySize: 2, x: "y" } });

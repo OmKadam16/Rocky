@@ -716,15 +716,15 @@ class BookingRun {
           this.input.push(this.computerOutput(pc.call_id, shot, pc.acknowledged));
           this.needFreshShot = false;
         } else if (this.needFreshShot) {
+          // The page changed outside a computer_call (open_url, a user takeover).
+          // The API only takes a plain input_image on a run's FIRST request
+          // ("Computer tool only allows input image without previous
+          // response"), so later screenshots must come back as computer_call
+          // output: ask the model to take one.
           this.needFreshShot = false;
-          const shot = await this.shoot();
-          if (!shot) break;
           this.input.push({
             role: "user",
-            content: [
-              { type: "input_text", text: "Current page:" },
-              { type: "input_image", image_url: shot.dataUrl, detail: "original" },
-            ],
+            content: [{ type: "input_text", text: "Rocky: the page has changed. Take a screenshot before you act." }],
           });
         }
         const limit = this.limitHit();
