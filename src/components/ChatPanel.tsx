@@ -6,23 +6,7 @@ import MicButton from "./MicButton";
 import AgentCard from "./AgentCard";
 import { useAgentView } from "../hooks/useAgentView";
 import { voiceInputSupported } from "../lib/speech";
-import { forgetEverything, loadMemory, onMemoryChange, removeFact, type ChatMemory } from "../lib/chatMemory";
-
-/** What Rocky remembers across chats, live. */
-function useChatMemory(): ChatMemory {
-  const [m, setM] = useState<ChatMemory>({ facts: [], summary: "", summarizedUpTo: 0 });
-  useEffect(() => {
-    let live = true;
-    const load = () => void loadMemory().then((x) => live && setM(x));
-    load();
-    const off = onMemoryChange(load);
-    return () => {
-      live = false;
-      off();
-    };
-  }, []);
-  return m;
-}
+import ChatMemoryPanel, { memoryEntryCount, useChatMemory } from "./ChatMemoryPanel";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -55,7 +39,7 @@ export default function ChatPanel({ assistant, renderCard }: Props) {
   const agent = useAgentView();
   const memory = useChatMemory();
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const memoryCount = memory.facts.length + (memory.summary.trim() ? 1 : 0);
+  const memoryCount = memoryEntryCount(memory);
   const agentBusy = !["idle", "done", "failed", "cancelled"].includes(agent.phase);
   const voiceSupported = voiceInputSupported();
   const canSend = draft.trim().length > 0 && state !== "thinking";
@@ -102,45 +86,7 @@ export default function ChatPanel({ assistant, renderCard }: Props) {
           )}
         </div>
       </div>
-      {memoryOpen && memoryCount > 0 && (
-        <div className="border-b border-line bg-card px-[48px] py-[16px]">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-micro tracking-tab uppercase text-grey">What Rocky remembers · laptop and phone</span>
-            <button
-              type="button"
-              onClick={() => {
-                if (window.confirm("Forget everything Rocky remembers from your chats?")) void forgetEverything();
-              }}
-              className="cursor-pointer font-mono text-micro tracking-tab uppercase text-grey-mid hover:text-warm"
-            >
-              Forget everything
-            </button>
-          </div>
-          {memory.facts.length > 0 && (
-            <ul className="mt-[10px] flex max-h-[180px] flex-col gap-[6px] overflow-y-auto overscroll-contain">
-              {memory.facts.map((f) => (
-                <li key={f.id} className="flex items-baseline justify-between gap-4 text-13 leading-[1.45] text-ink">
-                  <span>{f.text}</span>
-                  <button
-                    type="button"
-                    aria-label={`Forget: ${f.text}`}
-                    onClick={() => void removeFact(f.id)}
-                    className="flex-none cursor-pointer font-mono text-micro text-grey-mid hover:text-warm"
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {memory.summary.trim() && (
-            <p className="mt-[10px] text-13 leading-[1.5] text-grey [text-wrap:pretty]">
-              <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">Earlier chats · </span>
-              {memory.summary}
-            </p>
-          )}
-        </div>
-      )}
+      {memoryOpen && memoryCount > 0 && <ChatMemoryPanel memory={memory} />}
 
       <div ref={thread} className="flex min-h-0 flex-1 flex-col gap-[26px] overflow-y-auto overscroll-contain px-[48px] py-8">
         {turns.length === 0 && state === "idle" && (

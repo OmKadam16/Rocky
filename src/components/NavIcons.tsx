@@ -11,6 +11,17 @@ export function CalendarIcon({ active }: IconProps) {
   );
 }
 
+/** A speech bubble, drawn in CSS like the others (phone tab bar). */
+export function ChatIcon({ active }: IconProps) {
+  const color = active ? "var(--color-ink)" : "var(--color-grey-mid)";
+  return (
+    <div className="relative h-[13px] w-[13px] flex-none">
+      <div className="absolute inset-x-0 top-0 h-[10px] rounded-[3px] border" style={{ borderColor: color }} />
+      <div className="absolute bottom-0 left-[3px] h-[4px] w-[4px] border-b border-l" style={{ borderColor: color, transform: "skewY(-30deg)" }} />
+    </div>
+  );
+}
+
 export function FixedIcon({ active }: IconProps) {
   const color = active ? "var(--color-ink)" : "var(--color-grey-mid)";
   return (

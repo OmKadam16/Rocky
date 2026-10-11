@@ -22,7 +22,7 @@ export default function ChatCardView({ card, assistant }: Props) {
     case "receipt":
       return <ReceiptCard card={card} assistant={assistant} />;
     case "memory":
-      return <MemoryResultCard status={card.status} answer={card.answer} sources={card.sources} />;
+      return <MemoryResultCard status={card.status} answer={card.answer} sources={card.sources} relayed={card.relayed} note={card.note} />;
     default:
       return null;
   }
