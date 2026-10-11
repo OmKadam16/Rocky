@@ -38,12 +38,24 @@ export function authCodeFromUrl(url: string): string | null {
  * Supabase session storage in the app: Android Keystore-backed (secure
  * storage plugin), not the WebView's localStorage. Loaded lazily so web
  * builds never touch it.
+ *
+ * Never resolve a promise WITH a Capacitor plugin: the plugin is a Proxy
+ * that turns every property, `then` included, into a native call, so the
+ * promise treats it as a thenable, calls the native "then" and never
+ * settles. That hung getSession() and left the app on its "Rocky" loading
+ * screen. Resolve the module and reach the plugin through it.
  */
-export function secureAuthStorage() {
-  const plugin = () => import("@aparajita/capacitor-secure-storage").then((m) => m.SecureStorage);
+type SecureStorageLike = {
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+  removeItem(key: string): Promise<void>;
+};
+export function secureAuthStorage(
+  load: () => Promise<{ SecureStorage: SecureStorageLike }> = () => import("@aparajita/capacitor-secure-storage") as Promise<{ SecureStorage: SecureStorageLike }>,
+) {
   return {
-    getItem: async (key: string) => (await plugin()).getItem(key),
-    setItem: async (key: string, value: string) => (await plugin()).setItem(key, value),
-    removeItem: async (key: string) => (await plugin()).removeItem(key),
+    getItem: async (key: string) => (await load()).SecureStorage.getItem(key),
+    setItem: async (key: string, value: string) => (await load()).SecureStorage.setItem(key, value),
+    removeItem: async (key: string) => (await load()).SecureStorage.removeItem(key),
   };
 }

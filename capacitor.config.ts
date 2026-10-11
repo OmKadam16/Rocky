@@ -18,8 +18,9 @@ const config: CapacitorConfig = {
     androidScheme: "https",
   },
   android: {
-    // Never on in release builds (Capacitor's default is debug builds only).
-    webContentsDebuggingEnabled: false,
+    // webContentsDebuggingEnabled is left unset on purpose: Capacitor's
+    // default is debug builds only, so chrome://inspect works on a debug APK
+    // and never on a release one. (Setting it false also blocked debug.)
     allowMixedContent: false,
   },
   plugins: {

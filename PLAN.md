@@ -445,6 +445,18 @@ Goal: bookings work from the Android app with the laptop off, with exactly the d
       `docs/ANDROID-DEVICE-TESTS.md`.
 - [ ] Om: run the device tests on a real phone (booking with the laptop closed).
 
+### Phase 17.1: Android blank screen fix (0.1.15)
+- [x] Cause: `secureAuthStorage` resolved a promise WITH the SecureStorage plugin; Capacitor's
+      plugin Proxy answers `then` with a native call, so the promise never settled, getSession()
+      hung and the app sat on the "Rocky" loading screen. Now the module is resolved and the
+      plugin reached through it (test reproduces the hang with a Capacitor-like Proxy).
+- [x] Never blank again: startup watchdog (`src/lib/boot.ts`, 8 s, plain-DOM "Rocky could not
+      start" with the real error, the stuck step, the version, Retry); `[rocky:boot]` console
+      steps; root ErrorBoundary shows the error + version; a failed session read goes to sign-in
+      with the reason.
+- [x] Version shown in Profile and phone settings; debug APKs inspectable via chrome://inspect
+      (release builds still not).
+
 ---
 
 ## 6. Do not build
@@ -563,3 +575,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Phase 17 On-phone booking agent: shared agent core + page probes (desktop unchanged), Kotlin RockyAgentBrowser (hardened visible WebView), the same BookingRun gates running in the Android app, laptop relay kept as the fallback; Android agent E2E through a mocked plugin 23/23.
 - 2026-10-11: Release setup: release keystore made outside the repo (gitignored), device test list matches the current sign-in + pairing-code flow; repos found under doubled names, secrets waiting on the gh CLI.
 - 2026-10-11: Release setup done: Actions secrets set (values never printed), releases repos renamed to the short names.
+- 2026-10-11: 0.1.15 Android blank screen fix: Supabase session storage no longer resolves a promise with a Capacitor plugin proxy (getSession hung); startup watchdog + [rocky:boot] logs + root error boundary with version; version in Profile; debug APKs inspectable.

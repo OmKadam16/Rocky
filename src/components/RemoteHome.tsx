@@ -462,7 +462,7 @@ function SettingsSheet({
         <button type="button" onClick={() => void signOut()} className="cursor-pointer rounded-[3px] border border-line-strong px-4 py-2.5 font-mono text-micro tracking-tab uppercase text-grey hover:border-ink hover:text-ink">
           Sign out
         </button>
-        <p className="text-center font-mono text-micro text-grey-faint">Signing out keeps the pairing.</p>
+        <p className="text-center font-mono text-micro text-grey-faint">Signing out keeps the pairing. · Rocky {__APP_VERSION__}</p>
       </motion.div>
     </div>
   );

@@ -198,6 +198,7 @@ export default function ProfilePage() {
               try { localStorage.clear(); } catch {}
               location.reload();
             }} className="cursor-pointer hover:text-ink-muted">Delete account</button>
+            <span className="ml-auto">Rocky {__APP_VERSION__}</span>
           </div>
 
           <div className="mt-11 flex items-baseline justify-between border-b border-line pb-3">

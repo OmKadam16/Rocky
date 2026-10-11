@@ -7,6 +7,18 @@ Run these on a real phone after installing a new APK (debug from the
 booking site through a mocked plugin) and the Kotlin unit test
 `AgentCoordsTest` (runs in the Android CI workflow).
 
+## If the app is blank or says "Rocky could not start"
+The app never stays on a blank screen: after 8 s it shows "Rocky could not start" with the
+real error, the step it got stuck on and the version (also in Profile / phone settings).
+For the full log (debug APKs only; release builds can't be inspected):
+1. Phone: Settings → About phone → tap "Build number" 7 times → Settings → System →
+   Developer options → USB debugging on. Plug the phone into the laptop, allow the prompt.
+2. Laptop Chrome: open `chrome://inspect/#devices`, find "Rocky" (com.rocky.calendar.android.debug)
+   under the phone, click **inspect**. The Console shows every `[rocky:boot]` step.
+3. Or, with Android platform-tools installed:
+   `adb logcat | Select-String -Pattern "Capacitor|chromium|rocky"` (PowerShell) /
+   `adb logcat | grep -E "Capacitor|chromium|rocky"` (bash).
+
 ## Install and sign in
 1. Allow "Install unknown apps" for the browser / file manager you use, open the APK, install.
 2. Open Rocky: splash in the app's canvas colour (light or dark with the phone), then sign-in.
