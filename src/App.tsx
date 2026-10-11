@@ -28,6 +28,7 @@ import { useLaptopHeartbeat } from "./lib/devices";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { hasLocalAgent } from "./lib/agentClient";
 import { startAgentRelayHost } from "./lib/agentRelay";
+import { isDesktop, syncSecretsOnce } from "./lib/secrets";
 import { db } from "./lib/db";
 import { toISODate } from "../shared/datetime";
 import type { ChatCard, PageName, ViewName } from "./types";
@@ -110,6 +111,12 @@ export default function App() {
   const { day, week, now, loading, error, refresh } = useSchedule(calendarDate);
   // Laptop presence heartbeat (every 15 s while open) for the phone's online chip.
   useLaptopHeartbeat(isSupabaseConfigured && !authLoading && !!user);
+  // Desktop, once per device: keys that only live in the keychain go up to the
+  // shared profile row so the phone gets them too.
+  useEffect(() => {
+    if (!isSupabaseConfigured || authLoading || !user || !isDesktop()) return;
+    void syncSecretsOnce().catch(() => {});
+  }, [authLoading, user]);
   // Desktop: run booking-agent requests from the paired phone and relay events back.
   useEffect(() => {
     if (!isSupabaseConfigured || authLoading || !user || !hasLocalAgent()) return;

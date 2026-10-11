@@ -111,7 +111,7 @@ export function useProfile(_token: string | null) {
       if (patch.display_name) localStorage.setItem("vc-user-name", String(patch.display_name));
     } catch {}
     await db.profiles.put(next as any);
-    // setSecret writes to the keychain on desktop, Dexie in the browser.
+    // setSecret writes the shared profile copy (all devices) + the keychain cache on desktop.
     if (patch.llm_key) await setSecret("llm_key", String(patch.llm_key));
     if (patch.el_key) await setSecret("el_key", String(patch.el_key));
     if (patch.browser_key) await setSecret("browser_key", String(patch.browser_key));

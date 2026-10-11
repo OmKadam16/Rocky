@@ -21,6 +21,12 @@ describe("supaDb row mapping", () => {
     expect(back).toEqual({ id: "local", display_name: "Om", llm_key_enc: "sk-secret", el_key_enc: "el-secret", browser_key_enc: "sk-browser" });
   });
 
+  it("a wiped key is written as null in extra, so the shared copy clears on every device", () => {
+    const row = toDbRow(TABLES.profiles, { id: "local", llm_key_enc: null, el_key_enc: "el-secret" }, UID);
+    expect(row.extra).toEqual({ llm_key_enc: null, el_key_enc: "el-secret" });
+    expect(fromDbRow(TABLES.profiles, row).llm_key_enc).toBeNull();
+  });
+
   it("ignores server-owned fields on write", () => {
     const row = toDbRow(TABLES.tasks, { id: "t1", name: "x", user_id: "someone-else", extra: { a: 1 }, updated_at: "now" }, UID);
     expect(row.user_id).toBe(UID);
