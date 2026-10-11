@@ -91,7 +91,7 @@ describe("summary of earlier chat", () => {
   });
 
   it("private turns and verification codes never go into the summary", async () => {
-    const complete = vi.fn(async () => "ok");
+    const complete = vi.fn(async (_p: { system: string; user: string }) => "ok");
     await foldIntoSummary(
       [
         turn("user", "what did I read about CRISPR?", { private: true }),
@@ -102,7 +102,7 @@ describe("summary of earlier chat", () => {
       complete,
       { all: true },
     );
-    const sent = complete.mock.calls[0][0].user;
+    const sent = complete.mock.calls[0]?.[0].user ?? "";
     expect(sent).toMatch(/book a haircut/);
     expect(sent).not.toMatch(/CRISPR|Broad|verification code/);
   });
