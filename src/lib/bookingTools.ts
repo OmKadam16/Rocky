@@ -265,7 +265,10 @@ export async function runBookingTool(name: string, args: Record<string, unknown>
       // Re-proposing moves the existing hold instead of stacking a second one.
       const dayBlocks = await cal.loadBlocks(date, date);
       const prevHold = [...drafts.entries()].find(([, v]) => v.venue?.toLowerCase() === d.venue?.toLowerCase())?.[0];
-      const ownHold = dayBlocks.find((b) => b.id === prevHold) ?? dayBlocks.find((b) => b.title.includes(HOLD_MARK) && d.venue && b.title.toLowerCase().includes(d.venue.toLowerCase()));
+      // A retry after a failed or unclear run reuses that hold too (it survives
+      // an app restart, the in-memory draft doesn't), instead of clashing with it.
+      const isOurHold = (t: string) => t.includes(HOLD_MARK) || /\((booking failed|check booking)/.test(t);
+      const ownHold = dayBlocks.find((b) => b.id === prevHold) ?? dayBlocks.find((b) => isOurHold(b.title) && d.venue && b.title.toLowerCase().includes(d.venue.toLowerCase()));
       const eventClash = await cal.eventOverlapError(date, start, end, ownHold?.id);
       if (eventClash) return eventClash;
       d = { ...d, endTime: d.endTime ?? null };

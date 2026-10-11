@@ -102,6 +102,15 @@ describe("propose_booking: one question at a time, then a hold + full plan", () 
     expect(blocks).toHaveLength(0);
   });
 
+  it("a retry reuses a failed hold from an earlier run instead of clashing with it", async () => {
+    const { cal, blocks } = calendar();
+    blocks.push({ id: "old", source_type: "event", source_id: null, title: "Haircut — Fade Co (booking failed - finish by hand)", date: "2099-10-17", start_time: "15:00", end_time: "16:00", previous_start_time: null, created_at: "" });
+    const r = (await runBookingTool("propose_booking", FULL, {}, cal)) as any;
+    expect(r.hold_block_id).toBe("old");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].title).toBe("Haircut — Fade Co (booking…)");
+  });
+
   it("re-proposing moves the hold instead of stacking a second", async () => {
     const { cal, blocks } = calendar();
     await runBookingTool("propose_booking", FULL, {}, cal);
