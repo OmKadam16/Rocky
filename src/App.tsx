@@ -209,7 +209,7 @@ export default function App() {
             turns={assistant.turns}
             caption={assistant.caption}
             level={assistant.level}
-            error={assistant.error}
+            error={assistant.error} timing={assistant.lastTiming}
             onToggle={assistant.toggle}
             onSend={assistant.send}
           />
@@ -231,7 +231,7 @@ export default function App() {
               onSetStatus={async (id, status) => { await setTaskStatus(id, status); await refreshAssignments(); await refresh(); }}
             />
           </main>
-          <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} onToggle={assistant.toggle} onSend={assistant.send} />
+          <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} timing={assistant.lastTiming} onToggle={assistant.toggle} onSend={assistant.send} />
         </div>
       ) : page === "dashboard" ? (
         <main id="main-scroll-dashboard" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth pb-10 pl-16 pr-[60px] pt-[52px]">
@@ -253,7 +253,7 @@ export default function App() {
           <main id="main-scroll-memory" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
             <MemoryPage />
           </main>
-          <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} onToggle={assistant.toggle} onSend={assistant.send} />
+          <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} timing={assistant.lastTiming} onToggle={assistant.toggle} onSend={assistant.send} />
         </div>
       ) : (
         <div className="flex min-w-0 flex-1 overflow-hidden">
@@ -330,7 +330,7 @@ export default function App() {
             turns={assistant.turns}
             caption={assistant.caption}
             level={assistant.level}
-            error={assistant.error}
+            error={assistant.error} timing={assistant.lastTiming}
             onToggle={assistant.toggle}
             onSend={assistant.send}
           />

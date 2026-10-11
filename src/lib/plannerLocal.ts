@@ -59,10 +59,24 @@ const CLAIMS_A_CHANGE =
 const CLAIMS_BOOKED =
   /\b(?:booked|reserved|confirmed|reservation(?: is)? (?:confirmed|complete|done|made)|locked in|you'?re (?:booked|on for)|table(?: is)? (?:booked|reserved)|confirmation (?:number|ref|code|email))\b/i;
 
+export type PlannerTiming = {
+  /** Supabase reads for the turn context. */
+  snapshotMs: number;
+  /** All model round-trips put together. */
+  llmMs: number;
+  /** Tool execution (each hits the database). */
+  toolMs: number;
+  /** How many model round-trips the turn took. */
+  rounds: number;
+  /** Wall clock for the whole planner call. */
+  totalMs: number;
+};
+
 export type PlannerResult = {
   reply: string;
   tools_used: { name: string; arguments: unknown; result: unknown }[];
   schedule_changed: boolean;
+  timing: PlannerTiming;
 };
 
 /**
@@ -73,6 +87,12 @@ export async function askPlannerLocal(
   message: string,
   history: AssistantTurn[],
 ): Promise<PlannerResult> {
+  const t0 = Date.now();
+  let snapshotMs = 0;
+  let llmMs = 0;
+  let toolMs = 0;
+  let rounds = 0;
+  const stamp = (): PlannerTiming => ({ snapshotMs, llmMs, toolMs, rounds, totalMs: Date.now() - t0 });
   const profile = await db.profiles.get("local");
   const key = (await getSecret("llm_key"))?.trim();
   if (!key) {
@@ -81,6 +101,7 @@ export async function askPlannerLocal(
         "Add your API key in Profile → Model to enable AI planning. You're in local mode — calendar still works by hand.",
       tools_used: [],
       schedule_changed: false,
+      timing: stamp(),
     };
   }
   if (!navigator.onLine) {
@@ -88,6 +109,7 @@ export async function askPlannerLocal(
       reply: "You're offline — AI needs internet. Calendar and manual adds still work.",
       tools_used: [],
       schedule_changed: false,
+      timing: stamp(),
     };
   }
 
@@ -103,13 +125,11 @@ export async function askPlannerLocal(
   const toolsUsed: PlannerResult["tools_used"] = [];
 
   try {
+    const tSnap = Date.now();
     const snapshot: any = await contextSnapshot();
-    let prefs: Record<string, unknown> | null = null;
-    try {
-      prefs = ((await db.preferences.get(1)) as unknown as Record<string, unknown>) ?? null;
-    } catch {
-      prefs = null;
-    }
+    snapshotMs += Date.now() - tSnap;
+    // Preferences ride the snapshot — no second database round-trip.
+    const prefs = ((snapshot.prefs as Record<string, unknown> | undefined) ?? null) as Record<string, unknown> | null;
     const aboutText = String(profile?.about_text ?? "").trim().slice(0, 2000);
     const earliest = String((prefs?.earliest_start_time as string | undefined) ?? "?");
     const latest = String((prefs?.latest_end_time as string | undefined) ?? "?");
@@ -172,6 +192,7 @@ export async function askPlannerLocal(
     let forceTool = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+      const tLlm = Date.now();
       const completion = await openai.chat.completions.create({
         model,
         messages,
@@ -180,6 +201,8 @@ export async function askPlannerLocal(
         // was not enough, so it no longer gets to answer from memory.
         tool_choice: forceTool ? "required" : "auto",
       });
+      llmMs += Date.now() - tLlm;
+      rounds += 1;
       forceTool = false;
 
       const choice = completion.choices[0].message;
@@ -226,6 +249,7 @@ export async function askPlannerLocal(
             reply: `That time's actually clear — there's nothing on ${requested.date === snapshot.today ? "today" : "that day"} then. I couldn't get it placed though, so say it once more.`,
             tools_used: toolsUsed,
             schedule_changed: false,
+            timing: stamp(),
           };
         }
 
@@ -248,6 +272,7 @@ export async function askPlannerLocal(
             reply: "I didn't actually get that onto your calendar — say it once more and I'll take another run at it.",
             tools_used: toolsUsed,
             schedule_changed: false,
+            timing: stamp(),
           };
         }
 
@@ -281,10 +306,11 @@ export async function askPlannerLocal(
             reply: "I haven't actually completed that booking — the time is only held on your calendar. Tell me to go ahead and I'll book it properly.",
             tools_used: toolsUsed,
             schedule_changed: changed,
+            timing: stamp(),
           };
         }
 
-        return { reply, tools_used: toolsUsed, schedule_changed: changed };
+        return { reply, tools_used: toolsUsed, schedule_changed: changed, timing: stamp() };
       }
 
       for (const call of calls) {
@@ -302,11 +328,13 @@ export async function askPlannerLocal(
         }
 
         let result: unknown;
+        const tTool = Date.now();
         try {
           result = await runTool(call.function.name, args, { openai, model, urgent });
         } catch (error) {
           result = { error: error instanceof Error ? error.message : String(error) };
         }
+        toolMs += Date.now() - tTool;
         toolsUsed.push({ name: call.function.name, arguments: args, result });
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
       }
@@ -316,6 +344,7 @@ export async function askPlannerLocal(
       reply: "I got tangled up working that out — can you say it again more simply?",
       tools_used: toolsUsed,
       schedule_changed: toolsUsed.some((t) => MUTATING_TOOLS.has(t.name)),
+      timing: stamp(),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -323,6 +352,7 @@ export async function askPlannerLocal(
       reply: `Local AI error: ${message}`,
       tools_used: toolsUsed,
       schedule_changed: toolsUsed.some((t) => MUTATING_TOOLS.has(t.name)),
+      timing: stamp(),
     };
   }
 }

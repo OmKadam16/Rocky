@@ -15,6 +15,27 @@ export function getSilenceMs(): number {
   return DEFAULT_SILENCE_MS;
 }
 
+/** Per-turn latency breakdown for the hidden debug readout. */
+export type AssistantTiming = {
+  plannerMs: number;
+  snapshotMs: number;
+  llmMs: number;
+  toolMs: number;
+  rounds: number;
+  ttsMs: number;
+  sendMs: number;
+  spoken: boolean;
+};
+
+export type SendOpts = {
+  /**
+   * False for typed sends: the reply shows as text and the turn goes idle
+   * immediately instead of waiting on speech synthesis + playback. Voice
+   * turns (mic, confirm buttons, conversation mode) leave it true.
+   */
+  speak?: boolean;
+};
+
 let turnId = 0;
 const nextId = () => `turn-${(turnId += 1)}`;
 
@@ -48,6 +69,7 @@ export function useAssistant(onScheduleChange: () => void) {
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isConversation, setIsConversation] = useState(false);
+  const [lastTiming, setLastTiming] = useState<AssistantTiming | null>(null);
 
   const stopListening = useRef<(() => void) | null>(null);
   const turnsRef = useRef<AssistantTurn[]>([]);
@@ -61,7 +83,9 @@ export function useAssistant(onScheduleChange: () => void) {
   }, []);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: SendOpts) => {
+      const speakReply = opts?.speak !== false;
+      const tSend = Date.now();
       push({ role: "user", text });
       setCaption("");
       setState("thinking");
@@ -84,6 +108,23 @@ export function useAssistant(onScheduleChange: () => void) {
         // Planner succeeded — the text reply stays visible even if voice fails.
         push({ role: "assistant", text: response.reply });
         if (response.schedule_changed) onScheduleChange();
+        const base: AssistantTiming = {
+          plannerMs: response.timing.totalMs,
+          snapshotMs: response.timing.snapshotMs,
+          llmMs: response.timing.llmMs,
+          toolMs: response.timing.toolMs,
+          rounds: response.timing.rounds,
+          ttsMs: 0,
+          sendMs: Date.now() - tSend,
+          spoken: speakReply,
+        };
+        setLastTiming(base);
+        try {
+          console.debug(`[rocky] turn ${base.sendMs}ms (planner ${base.plannerMs}: snap ${base.snapshotMs} + llm ${base.llmMs} in ${base.rounds} rounds + tools ${base.toolMs}) spoken=${speakReply}`);
+        } catch {}
+        // Typed sends end here: text is up, calendar refreshed, turn idle.
+        // Speaking every typed reply made texting feel as slow as voice.
+        if (!speakReply) return;
 
         setState("speaking");
         const controller = new AbortController();
@@ -98,6 +139,7 @@ export function useAssistant(onScheduleChange: () => void) {
         }
         try {
           await speak(response.reply, { signal: controller.signal });
+          setLastTiming((t) => (t ? { ...t, ttsMs: Date.now() - tSend - t.plannerMs, sendMs: Date.now() - tSend } : t));
         } catch (speakFailure) {
           if ((speakFailure as Error)?.name === "AbortError") {
             setCaption("");
@@ -237,6 +279,7 @@ export function useAssistant(onScheduleChange: () => void) {
     caption,
     level,
     error,
+    lastTiming,
     toggle,
     toggleConversation,
     isConversation,

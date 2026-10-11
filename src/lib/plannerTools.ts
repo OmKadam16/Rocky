@@ -1613,5 +1613,7 @@ export async function contextSnapshot() {
     // plainly empty, so it is no longer asked to work out what is free — it is
     // told. free_windows is authoritative; anything inside one is bookable.
     today_schedule: todaySchedule,
+    // Returned so the planner doesn't refetch preferences a second time.
+    prefs,
   };
 }

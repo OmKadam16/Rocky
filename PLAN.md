@@ -239,3 +239,8 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   (first/last name, phone, email with account-email suggestion, occasion); prompt rules for
   time windows (slot-finder, never pin to window start), holds-are-not-bookings, and
   spoken/on-screen receipts only (no email sending).
+- 2026-10-10: Turn latency, measured then cut: every planner turn now records timing
+  (snapshot / llm-per-round / tools / total) with a hidden debug readout (AssistantPanel,
+  `vc-debug=1` in localStorage) plus a console line; preferences ride the snapshot (one
+  fewer database round-trip); typed sends stay silent (text up, turn idle immediately)
+  instead of waiting on speech synthesis — mic turns and yes/cancel still speak.

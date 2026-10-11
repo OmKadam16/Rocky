@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { AssistantState, AssistantTurn } from "../types";
+import type { AssistantTiming } from "../hooks/useAssistant";
 import MicButton from "./MicButton";
 import { voiceInputSupported } from "../lib/speech";
 
@@ -29,12 +30,14 @@ type Props = {
   level?: number;
   error: string | null;
   onToggle: () => void;
-  onSend?: (text: string) => void;
+  onSend?: (text: string, opts?: { speak?: boolean }) => void;
   onCollapse?: () => void;
   collapsed?: boolean;
+  /** Last turn's latency. Shown only with vc-debug=1 in localStorage. */
+  timing?: AssistantTiming | null;
 };
 
-export default function AssistantPanel({ state, turns, caption, level = 0, error, onToggle, onSend, onCollapse, collapsed }: Props) {
+export default function AssistantPanel({ state, turns, caption, level = 0, error, onToggle, onSend, onCollapse, collapsed, timing }: Props) {
   if (collapsed) {
     return (
       <aside className="flex h-screen max-h-screen w-[62px] flex-none flex-col items-center border-l border-line bg-panel py-6">
@@ -63,6 +66,10 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
   }
   const thread = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
+  // Latency readout for tuning. Off unless localStorage vc-debug === "1".
+  const [debugOn] = useState(() => {
+    try { return localStorage.getItem("vc-debug") === "1"; } catch { return false; }
+  });
   const voiceSupported = voiceInputSupported();
   const canSend = draft.trim().length > 0 && state !== "thinking";
   const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant");
@@ -72,7 +79,10 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
 
   const submit = () => {
     if (!canSend || !onSend) return;
-    onSend(draft.trim());
+    // Typed turns stay silent: text is up and the turn idles immediately
+    // instead of waiting on speech synthesis + playback. Mic turns and the
+    // yes/cancel buttons below keep speaking (default).
+    onSend(draft.trim(), { speak: false });
     setDraft("");
   };
 
@@ -238,6 +248,11 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
           <MicButton state={state} onToggle={onToggle} />
           <div className="font-mono text-hint leading-[1.5] text-grey">{HINT[state]}</div>
         </div>
+        {debugOn && timing && (
+          <div className="mt-3 font-mono text-micro leading-[1.5] text-grey-faint">
+            {timing.sendMs}ms total · planner {timing.plannerMs} (snap {timing.snapshotMs} + llm {timing.llmMs}/{timing.rounds}r + tools {timing.toolMs}){timing.spoken ? ` · tts ${timing.ttsMs}` : " · silent"}
+          </div>
+        )}
       </div>
     </aside>
   );
