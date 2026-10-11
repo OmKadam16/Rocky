@@ -1,0 +1,83 @@
+# Android release: push a tag android-v<package.json version>.
+#   npm version patch --no-git-tag-version   (or edit package.json)
+#   git commit -am "release 0.1.15" && git tag android-v0.1.15 && git push && git push --tags
+# Builds the web bundle + the signed release APK, writes android-update.json
+# (SHA-256 + sizes) and publishes all three to the PUBLIC repo
+# OmKadam16/rocky-android-releases. Phones check that manifest.
+#
+# Secrets (Settings -> Secrets and variables -> Actions), added by hand:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+#   ANDROID_KEY_PASSWORD (scripts/android-keystore.md), RELEASES_REPO_TOKEN
+#   (fine-grained, Contents: read and write on the two releases repos only),
+#   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_PUBLIC_URL.
+name: Release Android
+
+on:
+  push:
+    tags: ["android-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_PUBLIC_URL: ${{ secrets.VITE_PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag must match package.json
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "${GITHUB_REF_NAME}" = "android-v$v" ] || { echo "Tag ${GITHUB_REF_NAME} != android-v$v"; exit 1; }
+      - name: Check build and signing secrets (names only, never values)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: node scripts/check-build-env.mjs VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_PUBLIC_URL ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v4
+      - run: npm ci
+      - run: npx vitest run
+      - run: npm run build:android:web
+      - name: Keystore (from secrets, never logged)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/rocky-release.jks"
+          echo "ROCKY_KEYSTORE_FILE=$RUNNER_TEMP/rocky-release.jks" >> "$GITHUB_ENV"
+      - name: Gradle assembleRelease
+        working-directory: android
+        env:
+          ROCKY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ROCKY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ROCKY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
+      - name: Release files + manifest
+        run: |
+          (cd dist && zip -qr ../dist.zip .)
+          node scripts/android-release-files.mjs android/app/build/outputs/apk/release/app-release.apk dist.zip out
+          rm -f "$RUNNER_TEMP/rocky-release.jks"
+      - uses: softprops/action-gh-release@v3
+        with:
+          repository: OmKadam16/rocky-android-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Rocky ${{ github.ref_name }}
+          make_latest: true
+          files: |
+            out/*.apk
+            out/dist.zip
+            out/android-update.json

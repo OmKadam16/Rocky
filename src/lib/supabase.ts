@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isNativeApp, secureAuthStorage } from "./native";
+import { firstEnvProblem } from "../../shared/envCheck.mjs";
 
 /**
  * The Supabase client. Rocky stores accounts and calendar data here so the
@@ -8,8 +9,21 @@ import { isNativeApp, secureAuthStorage } from "./native";
  * on-device database so it still runs.
  */
 
-const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
-const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+/**
+ * Which build-time Supabase value is unusable (BOM, non-ASCII, spaces), or
+ * null. Checked on the raw values: the minifier folds `.trim()` on these
+ * constants at build time and does not remove a BOM, so trim can't be trusted.
+ */
+export function supabaseConfigProblem(u: string | undefined, k: string | undefined): { name: string; problem: string } | null {
+  return firstEnvProblem([["VITE_SUPABASE_URL", u], ["VITE_SUPABASE_ANON_KEY", k]], { allowEmpty: true });
+}
+export const SUPABASE_CONFIG_PROBLEM = supabaseConfigProblem(rawUrl, rawKey);
+
+const url = SUPABASE_CONFIG_PROBLEM ? undefined : rawUrl;
+const anonKey = SUPABASE_CONFIG_PROBLEM ? undefined : rawKey;
 
 export const isSupabaseConfigured = Boolean(url && anonKey && !url.includes("your-project"));
 
@@ -18,7 +32,7 @@ let client: SupabaseClient | null = null;
 export function supabase(): SupabaseClient {
   if (!isSupabaseConfigured) throw new Error("Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).");
   if (!client) {
-    client = createClient(url!, anonKey!, {
+    client = createClient(url!.trim(), anonKey!.trim(), {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

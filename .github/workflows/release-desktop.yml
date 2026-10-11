@@ -1,0 +1,46 @@
+# Desktop (Windows) release: push a tag v<package.json version>.
+#   git tag v0.1.15 && git push --tags
+# Builds the NSIS installer and publishes it with latest.yml and the
+# blockmap to the PUBLIC repo OmKadam16/rocky-releases; installed apps find
+# it through electron-updater. Windows builds aren't code-signed.
+#
+# Secrets: RELEASES_REPO_TOKEN (fine-grained, Contents: read and write on the
+# releases repos only), VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_PUBLIC_URL.
+name: Release desktop
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_PUBLIC_URL: ${{ secrets.VITE_PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag must match package.json
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "${GITHUB_REF_NAME}" = "v$v" ] || { echo "Tag ${GITHUB_REF_NAME} != v$v"; exit 1; }
+      - name: Check build secrets (names only, never values)
+        shell: bash
+        run: node scripts/check-build-env.mjs VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_PUBLIC_URL
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run
+      - run: npm run build:electron
+      - name: Build and publish the installer
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: npx electron-builder --win --publish always

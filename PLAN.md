@@ -457,6 +457,19 @@ Goal: bookings work from the Android app with the laptop off, with exactly the d
 - [x] Version shown in Profile and phone settings; debug APKs inspectable via chrome://inspect
       (release builds still not).
 
+### Phase 17.2: Bad characters in build secrets
+- [x] Cause: the secrets were set through a Windows PowerShell 5.1 pipe, which prefixes a UTF-8
+      BOM; the APK's Supabase URL and anon key started with U+FEFF (the minifier folded `.trim()`
+      at build time without removing it), so sign-in's fetch rejected the header. All 7 secrets
+      re-set from BOM-free files (`gh secret set NAME < file`), checked printable ASCII.
+- [x] `shared/envCheck.mjs` + `scripts/check-build-env.mjs`: every workflow (debug APK, Android
+      and desktop releases) stops first with the secret's NAME and the problem, never the value.
+- [x] App: a bad Supabase URL/key shows "Rocky is misconfigured: <NAME> has invalid characters.
+      Rebuild the app." instead of a raw fetch error (checked on the raw value, not trim).
+- [x] Found on the way: `.gitignore`'s `release-*` (local build folders) also matched
+      `.github/workflows/release-*.yml`, so neither release workflow was ever committed and tags
+      would have done nothing. Exception added; both workflows now in git.
+
 ---
 
 ## 6. Do not build
@@ -576,3 +589,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Release setup: release keystore made outside the repo (gitignored), device test list matches the current sign-in + pairing-code flow; repos found under doubled names, secrets waiting on the gh CLI.
 - 2026-10-11: Release setup done: Actions secrets set (values never printed), releases repos renamed to the short names.
 - 2026-10-11: 0.1.15 Android blank screen fix: Supabase session storage no longer resolves a promise with a Capacitor plugin proxy (getSession hung); startup watchdog + [rocky:boot] logs + root error boundary with version; version in Profile; debug APKs inspectable.
+- 2026-10-11: Build secrets re-set without the PowerShell BOM; CI secret checks (names only) in all workflows; app shows a 'misconfigured' screen for a bad Supabase URL/key.

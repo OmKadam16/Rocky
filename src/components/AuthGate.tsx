@@ -3,7 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import AuthScreen from "./AuthScreen";
 import { SessionContext } from "../hooks/useAuth";
 import { usingCloud } from "../lib/db";
-import { supabase } from "../lib/supabase";
+import { SUPABASE_CONFIG_PROBLEM, supabase } from "../lib/supabase";
 import { startRealtime, stopRealtime } from "../lib/supaDb";
 import { shouldShowMobileUi } from "../lib/isMobile";
 import { bootError, bootReady, bootStep } from "../lib/boot";
@@ -20,8 +20,26 @@ type State =
  * account is signed out instead of reaching the app as a ghost user.
  */
 export default function AuthGate({ children }: { children: ReactNode }) {
+  if (SUPABASE_CONFIG_PROBLEM) return <Misconfigured name={SUPABASE_CONFIG_PROBLEM.name} problem={SUPABASE_CONFIG_PROBLEM.problem} />;
   if (!usingCloud) return <LocalGate>{children}</LocalGate>;
   return <CloudGate>{children}</CloudGate>;
+}
+
+/** A broken build-time value: say which one, instead of a raw fetch error at sign-in. */
+export function Misconfigured({ name, problem }: { name: string; problem: string }) {
+  useEffect(() => {
+    bootStep(`misconfigured: ${name} ${problem}`);
+    bootReady();
+  }, [name, problem]);
+  return (
+    <div role="alert" className="flex min-h-screen items-center justify-center bg-canvas p-6 text-ink sm:p-10">
+      <div className="w-full max-w-[560px]">
+        <h1 className="text-[26px] font-medium tracking-[-0.02em]">Rocky is misconfigured: {name} has invalid characters. Rebuild the app.</h1>
+        <p className="mt-4 font-mono text-[12px] leading-[1.6] text-grey">{name} {problem}.</p>
+        <p className="mt-3 font-mono text-[11px] text-grey-soft">Rocky {__APP_VERSION__}</p>
+      </div>
+    </div>
+  );
 }
 
 function LocalGate({ children }: { children: ReactNode }) {

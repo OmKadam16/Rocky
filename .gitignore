@@ -22,6 +22,8 @@ landing/
 # Built Chrome extension (npm run build:extension)
 extension/dist
 release-*
+# ...but not the release workflows (the rule above once kept them out of git).
+!.github/workflows/release-*.yml
 # Phone screenshot harness output (npm run screens:phone)
 test-results/
 

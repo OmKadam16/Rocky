@@ -1,7 +1,7 @@
 # Debug APK on every push to main that touches the app (and by hand).
 # Download it from the run's "Artifacts" (rocky-debug-apk).
 # Uses repo secrets VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY / VITE_PUBLIC_URL
-# when present; without them the APK runs with no account (can't pair).
+# (required: the build stops if one is missing or has a BOM/non-ASCII/space).
 name: Android debug APK
 
 on:
@@ -32,6 +32,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v4
+      - name: Check build secrets (names only, never values)
+        run: node scripts/check-build-env.mjs VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_PUBLIC_URL
       - run: npm ci
       - run: npm run build:android:web
       - name: Gradle assembleDebug (+ unit tests)

@@ -72,3 +72,13 @@ Every push to `main` that touches the app builds a debug APK
 JDK 21 + Android SDK, then `npm run build:android` →
 `android/app/build/outputs/apk/debug/app-debug.apk`. The debug app is
 `com.rocky.calendar.android.debug`, so it installs next to the release app.
+
+## Setting secrets safely (Windows)
+Windows PowerShell 5.1 adds a UTF-8 BOM (and CRLF) to anything piped into a
+program, so `"value" | gh secret set NAME` stores a broken secret. That is
+how the Supabase URL and key once reached the APK with a BOM ("non
+ISO-8859-1 code point" at sign-in). Instead, write the value to a file with no
+BOM and no newline, then `gh secret set NAME -R OmKadam16/Rocky < file` from
+cmd or bash (or paste it in GitHub's web form), and delete the file. Every
+workflow runs `scripts/check-build-env.mjs` first and stops with the secret's
+NAME (never its value) if one is empty, non-ASCII or has spaces around it.
