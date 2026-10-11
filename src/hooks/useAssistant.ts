@@ -4,6 +4,7 @@ import { askPlanner } from "../lib/planner";
 import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, stopSpeaking } from "../lib/speech";
 import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, submitAgentCode, subscribeAgent } from "../lib/agentClient";
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
+import { startThinkingAck, type ThinkingAck } from "../lib/thinkingAck";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 import { foldIntoSummary } from "../lib/chatMemory";
@@ -307,9 +308,23 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
         }
         let response;
         beginCapture();
+        // Spoken turns: "One moment." if the planner takes more than a beat
+        // (and "Still on it." if it takes long). Same switch as the booking
+        // progress lines (Profile -> Voice -> Spoken progress updates).
+        let ack: ThinkingAck | null = null;
+        if (speakReply && progressSpeechOn()) {
+          ack = startThinkingAck(text, (line, signal) => speak(line, { signal }), {
+            onLine: (line) => {
+              recentFillers.current = [...recentFillers.current.filter((f) => Date.now() - f.at < 15000), { text: line, at: Date.now() }];
+            },
+          });
+        }
         try {
           response = await askPlanner(text, turnsRef.current.slice(0, -1));
+          // The reply waits for a "one moment" that's still playing.
+          await ack?.finish();
         } catch (failure) {
+          ack?.cancel();
           if ((failure as Error)?.name === "AbortError") {
             setCaption("");
             return;
