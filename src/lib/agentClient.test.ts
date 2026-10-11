@@ -54,3 +54,14 @@ describe("agent view + announcements", () => {
     ]);
   });
 });
+
+describe("progress lines in the view", () => {
+  it("show as the status line while working, never over a pause", () => {
+    const base = { ...getAgentView(), phase: "running" as const };
+    const v = reduceAgentEvent(base, { type: "progress", text: "Checking availability." });
+    expect(v).toMatchObject({ status: "Checking availability.", progress: "Checking availability.", progressSeq: base.progressSeq + 1 });
+    expect(v.seq).toBe(base.seq); // not an announcement: no chat bubble, no queue
+    const paused = reduceAgentEvent({ ...base, phase: "question", status: "Waiting for your answer" }, { type: "progress", text: "Still on it." });
+    expect(paused.status).toBe("Waiting for your answer");
+  });
+});

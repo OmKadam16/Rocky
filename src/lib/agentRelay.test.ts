@@ -34,3 +34,16 @@ describe("phone relay: only short text crosses Supabase", () => {
     expect(parseRequest({ op: "start" })).toBe(null);
   });
 });
+
+describe("progress lines cross to the phone", () => {
+  it("relays the short filler text only", () => {
+    expect(sanitizeForRelay({ type: "progress", text: "Checking availability." })).toEqual({ type: "progress", text: "Checking availability." });
+    expect((sanitizeForRelay({ type: "progress", text: "x".repeat(500) }) as { text: string }).text.length).toBe(80);
+  });
+
+  it("timing stays on the laptop", () => {
+    const step = { n: 1, screenshotMs: 1, modelMs: 1, actionMs: 1, settleMs: 1, navMs: 1, shotKb: 1, totalMs: 5 };
+    const summary = { steps: 1, totalMs: 5, avgStepMs: 5, avgModelMs: 1, avgScreenshotMs: 1, avgActionMs: 1, avgSettleMs: 1, navMs: 1, maxStepMs: 5 };
+    expect(sanitizeForRelay({ type: "timing", step, summary })).toBe(null);
+  });
+});

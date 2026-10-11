@@ -37,6 +37,8 @@ export function sanitizeForRelay(e: AgentEvent): AgentEvent | null {
       return null; // the step log stays on the laptop
     case "status":
       return { type: "status", state: e.state, text: clip(e.text, 80) };
+    case "progress":
+      return { type: "progress", text: clip(e.text, 80) };
     case "question":
       return { type: "question", question: clip(e.question, 300), field: clip(e.field, 60) };
     case "needs_confirmation":

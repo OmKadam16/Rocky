@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantState, AssistantTurn } from "../types";
 import { askPlanner } from "../lib/planner";
 import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, stopSpeaking } from "../lib/speech";
-import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, subscribeAgent } from "../lib/agentClient";
+import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, onFillerCancel, setProgressBusy, subscribeAgent } from "../lib/agentClient";
+import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 
 export const DEFAULT_SILENCE_MS = 1200;
@@ -53,6 +54,19 @@ const FILLER = /^(uh+|um+|hmm+|erm?|ah+|like|so|well|okay|ok|yeah|yep|right|mhm)
  * single short words. The planner decides from history what "ok" means.
  */
 const CONFIRM_WORD = /^(yes|yeah|yep|yup|no|nope|sure|okay|ok|cancel|confirm|confirmed|stop|go ahead|do it|continue|done)\s*[.!?]*$/i;
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** The mic picked up Rocky's own progress line, not the user. */
+export function isEchoOf(text: string, recent: string[]): boolean {
+  const t = norm(text);
+  // Control words always get through ("say stop any time" -> the user says stop).
+  if (!t || t.split(" ").length < 2 || isStop(text) || CONFIRM_WORD.test(text.trim())) return false;
+  return recent.some((r) => {
+    const f = norm(r);
+    return f.includes(t) || (t.includes(f) && t.length - f.length < 6);
+  });
+}
 
 function isFiller(text: string): boolean {
   const trimmed = text.trim();
@@ -233,7 +247,8 @@ export function useAssistant(onScheduleChange: () => void) {
           onPartial: setCaption,
           onLevel: setLevel,
           onFinal: (text) => {
-            if (isFiller(text)) {
+            const recent = recentFillers.current.filter((f) => Date.now() - f.at < 15000).map((f) => f.text);
+            if (isFiller(text) || isEchoOf(text, recent)) {
               // Nothing worth acting on — stay quiet and let them try again.
               setCaption("");
               return;
@@ -300,8 +315,72 @@ export function useAssistant(onScheduleChange: () => void) {
 
   const announceQueue = useRef<string[]>([]);
   const lastSeq = useRef(getAgentView().seq);
+  const lastProgressSeq = useRef(getAgentView().progressSeq);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  const captionRef = useRef(caption);
+  captionRef.current = caption;
+
+  // ---- spoken progress fillers ------------------------------------------
+  // Fillers never take the turn: no chat bubble, state stays as it is, and
+  // anything real (an announcement, the user's voice, a mic tap) cuts them.
+  const filler = useRef<{ abort: AbortController; stopBarge: (() => void) | null } | null>(null);
+  /** Recent filler lines, so an open mic hearing Rocky isn't taken as the user. */
+  const recentFillers = useRef<{ text: string; at: number }[]>([]);
+  const stopFiller = useCallback(() => {
+    const f = filler.current;
+    if (!f) return;
+    filler.current = null;
+    f.abort.abort();
+    f.stopBarge?.();
+    stopSpeaking();
+  }, []);
+  const speakFiller = useCallback(
+    async (text: string) => {
+      if (filler.current || !progressSpeechOn()) return;
+      const s = stateRef.current;
+      // Real speech, thinking, or the user mid-sentence: drop it, never queue.
+      if (s === "speaking" || s === "thinking") return;
+      if (s === "listening" && (captionRef.current || levelRef.current > 0.12)) return;
+      const abort = new AbortController();
+      // Barge-in: with the mic closed, watch for the user starting to talk.
+      const stopBarge = s === "listening" ? null : createBargeInAnalyser(() => stopFiller());
+      filler.current = { abort, stopBarge };
+      recentFillers.current = [...recentFillers.current.filter((f) => Date.now() - f.at < 15000), { text, at: Date.now() }];
+      try {
+        await speak(text, { signal: abort.signal });
+      } catch {
+        /* a filler failing is never worth an error */
+      } finally {
+        if (filler.current?.abort === abort) {
+          filler.current = null;
+          stopBarge?.();
+        }
+      }
+    },
+    [stopFiller],
+  );
+  // An open mic (hands-free) that hears the user stops a playing filler.
+  useEffect(() => {
+    if (filler.current && state === "listening" && level > 0.25) stopFiller();
+  }, [level, state, stopFiller]);
+  useEffect(() => {
+    void loadProgressSpeech();
+    setProgressBusy(() => {
+      const s = stateRef.current;
+      if (s === "speaking" || s === "thinking") return true;
+      if (s === "listening" && (captionRef.current || levelRef.current > 0.12)) return true;
+      return Boolean(filler.current);
+    });
+    const off = onFillerCancel(stopFiller);
+    return () => {
+      off();
+      setProgressBusy(() => false);
+      stopFiller();
+    };
+  }, [stopFiller]);
   const flushAnnouncements = useCallback(async () => {
     if (stateRef.current !== "idle") return;
     const next = announceQueue.current.shift();
@@ -319,14 +398,21 @@ export function useAssistant(onScheduleChange: () => void) {
   useEffect(
     () =>
       subscribeAgent((v) => {
+        const here = !(v.origin === "phone" && !v.remote);
+        if (v.progressSeq !== lastProgressSeq.current) {
+          lastProgressSeq.current = v.progressSeq;
+          // Same rule as announcements: the device the user talks to speaks.
+          if (v.progress && here && ["running", "starting"].includes(v.phase)) void speakFiller(v.progress);
+        }
         if (v.seq === lastSeq.current) return;
         lastSeq.current = v.seq;
+        stopFiller();
         // A run the phone started is spoken on the phone; the laptop just shows it.
-        if (v.announce && !(v.origin === "phone" && !v.remote)) announceQueue.current.push(v.announce);
+        if (v.announce && here) announceQueue.current.push(v.announce);
         if (["done", "failed", "cancelled"].includes(v.phase)) onScheduleChange();
         void flushAnnouncements();
       }),
-    [flushAnnouncements, onScheduleChange],
+    [flushAnnouncements, onScheduleChange, speakFiller, stopFiller],
   );
   useEffect(() => {
     if (state === "idle" && announceQueue.current.length) void flushAnnouncements();

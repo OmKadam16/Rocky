@@ -17,6 +17,7 @@ import {
 } from "../lib/models";
 import { testElevenKey, testLlmKey } from "../lib/providerTest";
 import { BROWSER_MODELS, browserModel, setBrowserModel, type BrowserModel } from "../lib/bookingTask";
+import { loadProgressSpeech, progressSpeechOn, setProgressSpeech } from "../lib/progressSetting";
 import { MEMORY_MODEL, checkOllama, hasMemoryModel } from "../lib/ollama";
 import { runVoiceSelfTest, type VoiceCheckStage } from "../lib/voiceCheck";
 import DevicesSection from "../components/DevicesSection";
@@ -68,6 +69,10 @@ export default function ProfilePage() {
   const [voicesError, setVoicesError] = useState("");
   const [voicesLoading, setVoicesLoading] = useState(false);
   const [silenceMs, setSilenceMs] = useState(() => getLS("vc-silence-ms", "1200"));
+  const [progressSpeech, setProgressSpeechState] = useState(() => progressSpeechOn());
+  useEffect(() => {
+    void loadProgressSpeech().then(setProgressSpeechState);
+  }, []);
   const [pEarliest, setPEarliest] = useState(() => getLS("vc-p-earliest", "09:00"));
   const [pLatest, setPLatest] = useState(() => getLS("vc-p-latest", "22:00"));
   const [pBuffer, setPBuffer] = useState(() => getLS("vc-p-buffer", "15"));
@@ -420,6 +425,22 @@ export default function ProfilePage() {
                     </select>
                     <span className="font-mono text-[10.5px] text-grey-soft">How long Rocky waits after you stop talking before it answers.</span>
                   </label>
+                  <div className="flex flex-col gap-[10px]">
+                    <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Spoken progress updates</span>
+                    <div className="flex items-center gap-2">
+                      {([true, false] as const).map((on) => (
+                        <button
+                          key={String(on)}
+                          type="button"
+                          onClick={() => { setProgressSpeechState(on); void setProgressSpeech(on).catch(() => {}); }}
+                          className={`cursor-pointer rounded-[3px] border px-[10px] py-[5px] font-mono text-[10.5px] ${progressSpeech === on ? "border-ink text-ink" : "border-line-strong text-grey-mid hover:border-ink hover:text-ink"}`}
+                        >
+                          {on ? "On" : "Off"}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="font-mono text-[10.5px] text-grey-soft">While the booking agent works, Rocky says short lines like “Checking availability.” so you know it's still going. The same line always shows on screen.</span>
+                  </div>
                   <div className="flex flex-col gap-[10px] rounded-[3px] border border-line bg-card px-[15px] py-[13px]">
                     <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Voice check</span>
                     <span className="font-mono text-[10.5px] text-grey-soft">Proves the saved keys work end to end: planner thinks, voice speaks.</span>

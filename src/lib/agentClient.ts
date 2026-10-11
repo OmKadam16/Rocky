@@ -19,6 +19,7 @@ import { emitDataChange } from "./supaDb";
 import { finalHoldTitle, type AgentTask } from "./bookingTask";
 import { saveBookingRecord } from "./bookingRecords";
 import { getSecret } from "./secrets";
+import { ProgressTalker } from "./progressTalker";
 
 /** One agent step (one model round trip and what it did), in ms. */
 export type AgentStepTiming = { n: number; screenshotMs: number; modelMs: number; actionMs: number; settleMs: number; navMs: number; shotKb: number; totalMs: number };
@@ -37,6 +38,8 @@ export type AgentTimingSummary = {
 export type AgentEvent =
   | { type: "status"; state: string; text: string; at?: number }
   | { type: "timing"; step: AgentStepTiming; summary: AgentTimingSummary; at?: number }
+  /** A code-built reassurance line while the agent works (progressTalker.ts). */
+  | { type: "progress"; text: string; at?: number }
   | { type: "step"; n: number; text: string; blocked?: boolean; at?: number }
   | { type: "question"; question: string; field: string; at?: number }
   | { type: "needs_confirmation"; kind: "final" | "safety"; summary: string; screenshot: string | null; at?: number }
@@ -79,6 +82,9 @@ export type AgentView = {
   remote: boolean;
   /** Laptop: "phone" when the phone started this run (the phone does the talking). */
   origin: "here" | "phone";
+  /** Latest progress line ("Checking availability."). Bumps `progressSeq`. */
+  progress: string | null;
+  progressSeq: number;
   /** Laptop only, for the hidden debug readout: last step + run averages. */
   timing: { last: AgentStepTiming | null; summary: AgentTimingSummary | null };
 };
@@ -98,6 +104,8 @@ const IDLE: AgentView = {
   seq: 0,
   remote: false,
   origin: "here",
+  progress: null,
+  progressSeq: 0,
   timing: { last: null, summary: null },
 };
 
@@ -220,6 +228,10 @@ export function reduceAgentEvent(v: AgentView, e: AgentEvent): AgentView {
       return { ...v, status: e.text, phase: e.state === "running" ? "running" : v.phase };
     case "timing":
       return { ...v, timing: { last: e.step, summary: e.summary } };
+    case "progress":
+      // Only while working: a late line never overwrites a question or result.
+      if (v.phase !== "running" && v.phase !== "starting") return v;
+      return { ...v, status: e.text, progress: e.text, progressSeq: v.progressSeq + 1 };
     case "step":
       return { ...v, log: [...v.log, { text: e.text, blocked: Boolean(e.blocked) }].slice(-60) };
     case "question":
@@ -260,6 +272,35 @@ export function applyAgentEvent(e: AgentEvent, remote = false, silent = false) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Progress talker (laptop: it sees the raw step log). Its lines become
+// `progress` events, shown on both devices and relayed to the phone.
+// ---------------------------------------------------------------------------
+
+let fillerBusy: () => boolean = () => false;
+const fillerCancels = new Set<() => void>();
+
+/** The voice loop says when real speech plays or the user is talking. */
+export function setProgressBusy(fn: () => boolean) {
+  fillerBusy = fn;
+}
+
+/** The voice loop stops a filler that's still playing when a real event lands. */
+export function onFillerCancel(fn: () => void): () => void {
+  fillerCancels.add(fn);
+  return () => fillerCancels.delete(fn);
+}
+
+const talker = new ProgressTalker({
+  emit: (text) => applyAgentEvent({ type: "progress", text }),
+  cancel: () => {
+    for (const fn of fillerCancels) fn();
+  },
+  // A phone-started run is spoken on the phone: the laptop can't hear it, so
+  // it relies on the spoken-length estimate and the phone drops overlaps.
+  busy: () => (view.origin === "phone" ? false : fillerBusy()),
+});
+
 let wired = false;
 function ensureWired() {
   if (wired) return;
@@ -268,6 +309,9 @@ function ensureWired() {
   if (!d) return;
   d.onEvent((e) => {
     applyAgentEvent(e);
+    talker.handle(e);
+    const said = announceFor(e);
+    if (said) talker.noteSpeech(said);
     void runEndEffects(e);
   });
   // A reload mid-run picks the paused state back up.
