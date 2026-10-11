@@ -40,6 +40,22 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: node scripts/check-build-env.mjs VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_PUBLIC_URL ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+      # The publish step retries blindly ("Too many retries"), so prove the
+      # token first: valid auth, then reachability of the releases repo.
+      # Write scope can't be probed without writing; if this passes and the
+      # publish still fails, the token needs Contents read+write on
+      # rocky-android-releases (re-set it from a BOM-free file).
+      - name: Preflight releases-repo token (names only, never values)
+        env:
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          [ -n "$RELEASES_REPO_TOKEN" ] || { echo "RELEASES_REPO_TOKEN is empty or missing."; exit 1; }
+          code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $RELEASES_REPO_TOKEN" -H "Accept: application/vnd.github+json" https://api.github.com/rate_limit)
+          echo "token auth check status: $code"
+          [ "$code" = "200" ] || { echo "RELEASES_REPO_TOKEN was rejected (HTTP $code): bad, expired, or mangled value. Re-set it from a BOM-free file."; exit 1; }
+          code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $RELEASES_REPO_TOKEN" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OmKadam16/rocky-android-releases)
+          echo "releases repo check status: $code"
+          [ "$code" = "200" ] || { echo "Cannot reach rocky-android-releases (HTTP $code)."; exit 1; }
       - uses: actions/setup-node@v7
         with:
           node-version: 22
