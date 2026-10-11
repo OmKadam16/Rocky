@@ -10,11 +10,18 @@ booking site through a mocked plugin) and the Kotlin unit test
 ## Install and sign in
 1. Allow "Install unknown apps" for the browser / file manager you use, open the APK, install.
 2. Open Rocky: splash in the app's canvas colour (light or dark with the phone), then sign-in.
-3. Sign in with the laptop's account. Kill the app and reopen: still signed in.
-4. "Forgot password" email: the link opens Rocky (needs the Supabase redirect URL).
+3. Sign in with the same email and password as on the laptop (the APK must be built with the
+   `VITE_SUPABASE_*` secrets, otherwise there is no sign-in). Kill the app and reopen: still signed in.
+4. "Forgot password" email: the link opens Rocky (needs the Supabase redirect URL
+   `com.rocky.calendar.android://auth`).
 
 ## Pair and the two tabs
-5. Laptop: Profile → Devices shows the 8-char code. Phone: enter it → "You're connected".
+5. Pairing is still a code, after sign-in (one code per account; no site address to type):
+   - Laptop: open Rocky → Profile → Devices; note the 8-character pairing code. Keep Rocky open.
+   - Phone: "Pair with your laptop." → Enter code → type the 8 characters → "Connecting to your
+     laptop…" → "You're connected." → Open calendar.
+   - Wrong or old code: a clear message, the code stays in the boxes. Unpair (phone settings) and
+     pair again works; signing out keeps the pairing.
 6. Calendar tab: today, chip "Laptop online", day/week, week strip; rotate the phone (no broken layout).
 7. Back button: Chat → Calendar; on Calendar → the app goes to the background.
 8. Chat tab: type "add gym tomorrow at 7 PM" → receipt with Undo; it shows on the laptop.

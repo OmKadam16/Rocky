@@ -29,4 +29,6 @@ test-results/
 *.jks
 *.keystore
 keystore.properties
+rocky-keys/
+*-passwords.txt
 android/app/release/

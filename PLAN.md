@@ -416,6 +416,10 @@ Goal: the phone UI as a real Android app (same code, same login, same tabs). No 
       `OmKadam16/rocky-android-releases`. Docs: `docs/RELEASING.md`.
 - [ ] Om: create both releases repos, RELEASES_REPO_TOKEN and build secrets, run keytool once,
       add the Supabase redirect URL, publish the first releases, then set UPDATES_ENABLED = true.
+      - [x] Release keystore generated outside the repo (`%USERPROFILE%\rocky-keys\`, gitignored).
+      - [ ] Releases repos exist only as `OmKadam16-rocky-releases` / `OmKadam16-rocky-android-releases`:
+            rename them (the workflows and the updater expect the short names).
+      - [ ] gh CLI not installed here: VITE_* and ANDROID_* Actions secrets not set yet.
 
 ### Phase 17: On-phone booking agent
 Goal: bookings work from the Android app with the laptop off, with exactly the desktop's gates.
@@ -557,3 +561,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-11: Phase 15 Android app (Capacitor 8): same web build in the phone UI, mic + spoken replies in the WebView, Keystore-backed session, deep-link email links, back button / resume / offline banner, icons + light/dark splash, debug + signed release builds, CI debug APK. No schema change.
 - 2026-10-11: Phase 16 Auto-update: desktop checks on start and every 6 h (download in background, ask before restart; unsigned NSIS, full downloads) + release-desktop.yml; Android OTA web bundles (SHA-256, rollback, minNativeVersion) + APK update card via the package installer + release-android.yml.
 - 2026-10-11: Phase 17 On-phone booking agent: shared agent core + page probes (desktop unchanged), Kotlin RockyAgentBrowser (hardened visible WebView), the same BookingRun gates running in the Android app, laptop relay kept as the fallback; Android agent E2E through a mocked plugin 23/23.
+- 2026-10-11: Release setup: release keystore made outside the repo (gitignored), device test list matches the current sign-in + pairing-code flow; repos found under doubled names, secrets waiting on the gh CLI.
