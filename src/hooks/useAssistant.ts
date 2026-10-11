@@ -7,6 +7,7 @@ import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
 import { foldIntoSummary } from "../lib/chatMemory";
+import { memoryBridge } from "../lib/memoryClient";
 import { completeWithPlanner } from "../lib/plannerLocal";
 import { commitmentCardFromTools, pendingProposalId } from "../lib/chatCards";
 import { startPendingBooking } from "../lib/bookingTools";
@@ -582,6 +583,19 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
   useEffect(() => {
     if (state === "idle" && announceQueue.current.length) void flushAnnouncements();
   }, [state, flushAnnouncements]);
+
+  // Memory's background worker (gists, compaction) waits while the user is
+  // mid-turn or a booking run is going: the local model is theirs then.
+  useEffect(() => {
+    const b = memoryBridge();
+    if (!b?.busy) return;
+    const tell = () => void b.busy(stateRef.current !== "idle" || isAgentActive()).catch(() => {});
+    tell();
+    const off = subscribeAgent(tell);
+    return () => {
+      off();
+    };
+  }, [state]);
 
   const toggleConversation = useCallback(() => {
     if (isConversationRef.current) {
