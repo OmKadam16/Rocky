@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { PROVIDER_BASE_URL, normalizeProvider, resolveModelId } from "./models";
+import { TRANSCRIBE_MODEL } from "./transcribe";
 
 function plainError(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
@@ -113,7 +114,7 @@ export async function testElevenKey(apiKey: string): Promise<{ ok: boolean; mess
   try {
     const form = new FormData();
     form.append("file", silentWavBlob(), "test.wav");
-    form.append("model_id", "scribe_v1");
+    form.append("model_id", TRANSCRIBE_MODEL);
     const resp = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
       method: "POST",
       headers: { "xi-api-key": key },
@@ -125,8 +126,9 @@ export async function testElevenKey(apiKey: string): Promise<{ ok: boolean; mess
       const t = (await resp.text().catch(() => "")).slice(0, 200);
       if (resp.status === 401 || resp.status === 403) {
         sttErr = `STT permission missing (${resp.status}). ${t}`.slice(0, 220);
-      } else if (resp.status === 422 || /audio|format|speech/i.test(t)) {
+      } else if (!/model/i.test(t) && (resp.status === 422 || /audio|format|speech/i.test(t))) {
         // Key is valid and reached STT; our silence just has no speech.
+        // A model error (e.g. a retired model id) is a real failure, not this.
         stt = true;
       } else {
         sttErr = `STT failed (${resp.status}). ${t}`.slice(0, 220);

@@ -39,7 +39,7 @@ describe("postTranscribe", () => {
     }, { key: "sk_test", audio: new Uint8Array([9]), mime: "audio/webm", fileName: "turn.webm", language: "en" });
     expect(text).toBe("dinner at seven");
     expect(seen.url).toBe("https://api.elevenlabs.io/v1/speech-to-text");
-    expect(seen.parts).toContainEqual(["model_id", "scribe_v1"]);
+    expect(seen.parts).toContainEqual(["model_id", "scribe_v2"]);
     expect(seen.parts).toContainEqual(["language_code", "en"]);
   });
 
@@ -58,7 +58,14 @@ describe("postTranscribe", () => {
     })).rejects.toThrow("Unauthorized");
     await expect(postTranscribe(async () => ({ ok: false, status: 500, text: async () => "" }), {
       key: "sk_test", audio: new Uint8Array([1]),
-    })).rejects.toThrow(/transcription failed \(500\)/);
+    })).rejects.toThrow(/request failed \(500\)/);
+  });
+
+  it("shows the provider's sentence, not raw JSON (e.g. a retired model id)", async () => {
+    const body = JSON.stringify({ detail: { status: "invalid_model", message: "Model scribe_v1 is no longer available." } });
+    await expect(postTranscribe(async () => ({ ok: false, status: 400, text: async () => body }), {
+      key: "sk_test", audio: new Uint8Array([1]),
+    })).rejects.toThrow("Voice-to-text failed: Model scribe_v1 is no longer available.");
   });
 
   it("maps network failure to Failed-to-fetch so the renderer retries it", async () => {

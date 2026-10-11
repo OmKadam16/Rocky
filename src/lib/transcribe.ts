@@ -1,4 +1,4 @@
-import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
+import { describeFailure, isNetworkError, logFailure, providerErrorText, withNetRetry } from "./netErrors";
 import { getSecret } from "./secrets";
 import { proxyTranscribe, voiceProxyAvailable } from "./voiceBridge";
 
@@ -14,7 +14,8 @@ import { proxyTranscribe, voiceProxyAvailable } from "./voiceBridge";
  */
 
 const TRANSCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text";
-const TRANSCRIBE_MODEL = "scribe_v1";
+/** scribe_v1 was removed by ElevenLabs on 2026-07-09; v2 is the batch successor. */
+export const TRANSCRIBE_MODEL = "scribe_v2";
 
 export type TranscribeHandlers = {
   onPartial?: (text: string) => void;
@@ -152,7 +153,7 @@ export function startTranscription(
       );
       if (!response.ok) {
         const detail = await response.text();
-        throw new Error(detail.slice(0, 140) || `transcription failed (${response.status})`);
+        throw new Error(`Voice-to-text failed: ${providerErrorText(detail, response.status)}`);
       }
       const data = (await response.json()) as { text?: string };
       const text = (data.text ?? "").trim();

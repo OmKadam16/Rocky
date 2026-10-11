@@ -1,4 +1,4 @@
-import { describeFailure, isNetworkError, logFailure, withNetRetry } from "./netErrors";
+import { describeFailure, isNetworkError, logFailure, providerErrorText, withNetRetry } from "./netErrors";
 import { speakableTimes } from "./clockTalk";
 import { getSecret } from "./secrets";
 import { db } from "./db";
@@ -405,7 +405,7 @@ async function speakOneChunk(chunk: string, key: string, voiceId: string, contro
     if (resp.status === 401 || resp.status === 403) {
       throw new Error("Voice key was rejected — check your ElevenLabs key in Profile → Voice. Text reply kept.");
     }
-    throw new Error(`Voice failed (${resp.status})${detail ? ` — ${detail}` : ""}. Text reply kept.`);
+    throw new Error(`Voice failed (${resp.status})${detail ? ` — ${providerErrorText(detail)}` : ""}. Text reply kept.`);
   }
   const body = resp.body;
   // Prefer true streaming playback; fall back to full-blob where MediaSource

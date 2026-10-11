@@ -11,8 +11,24 @@
  */
 
 const ELEVEN_STT = "https://api.elevenlabs.io/v1/speech-to-text";
+/** scribe_v1 was removed by ElevenLabs on 2026-07-09; v2 is the batch successor. */
+const STT_MODEL = "scribe_v2";
 /** 90-second turns never approach this; anything bigger is a corrupt blob. */
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+
+/** Same as providerErrorText in src/lib/netErrors.ts: the sentence, never raw JSON. */
+function providerErrorText(raw, status) {
+  let text = String(raw || "").trim();
+  try {
+    const j = JSON.parse(text);
+    const d = j && j.detail;
+    const msg = typeof d === "string" ? d : d && typeof d.message === "string" ? d.message : j && typeof j.message === "string" ? j.message : null;
+    if (msg) text = msg;
+  } catch {
+    /* not JSON: keep the text */
+  }
+  return text.slice(0, 160) || `request failed (${status})`;
+}
 
 function asBytes(audio) {
   if (audio instanceof Uint8Array) return audio;
@@ -35,7 +51,7 @@ async function postTranscribe(fetchImpl, args) {
   if (bytes.length > MAX_AUDIO_BYTES) throw new Error("That recording is too long — try a shorter turn.");
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: String(a.mime || "audio/webm") }), String(a.fileName || "turn.webm"));
-  form.append("model_id", "scribe_v1");
+  form.append("model_id", STT_MODEL);
   if (a.language) form.append("language_code", String(a.language));
   let resp;
   try {
@@ -54,7 +70,7 @@ async function postTranscribe(fetchImpl, args) {
     } catch {
       /* fall through to status */
     }
-    throw new Error(String(detail || "").slice(0, 140) || `transcription failed (${resp.status})`);
+    throw new Error(`Voice-to-text failed: ${providerErrorText(detail, resp.status)}`);
   }
   const data = await resp.json();
   return String((data && data.text) || "").trim();
@@ -64,4 +80,4 @@ function registerVoiceProxy(ipcMain, fetchImpl) {
   ipcMain.handle("voice:transcribe", (_event, args) => postTranscribe(fetchImpl, args));
 }
 
-module.exports = { registerVoiceProxy, postTranscribe, MAX_AUDIO_BYTES, ELEVEN_STT };
+module.exports = { registerVoiceProxy, postTranscribe, providerErrorText, MAX_AUDIO_BYTES, ELEVEN_STT, STT_MODEL };

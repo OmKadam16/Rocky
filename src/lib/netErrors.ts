@@ -75,3 +75,20 @@ export function readErrorLog(): ErrorEntry[] {
     return [];
   }
 }
+
+/**
+ * ElevenLabs errors come back as JSON (`{"detail":{"message":...}}` or
+ * `{"detail":"..."}`); pull out the sentence so the UI never shows raw JSON.
+ */
+export function providerErrorText(raw: string, status?: number): string {
+  let text = raw.trim();
+  try {
+    const j = JSON.parse(text) as { detail?: unknown; message?: unknown; error?: unknown };
+    const d = j.detail as { message?: unknown } | string | undefined;
+    const msg = typeof d === "string" ? d : typeof d?.message === "string" ? d.message : typeof j.message === "string" ? j.message : null;
+    if (msg) text = msg;
+  } catch {
+    /* not JSON: keep the text */
+  }
+  return text.slice(0, 160) || (status ? `request failed (${status})` : "request failed");
+}
