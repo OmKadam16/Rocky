@@ -1,5 +1,7 @@
 export const OLLAMA_BASE = "http://localhost:11434";
 export const MEMORY_MODEL = "qwen3.5:2b";
+/** Local embedding model for Memory search (electron/memoryVectors.cjs keeps the same name). */
+export const EMBED_MODEL = "nomic-embed-text";
 
 export type OllamaStatus =
   | { state: "ready"; models: string[] }

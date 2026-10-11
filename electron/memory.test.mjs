@@ -7,11 +7,17 @@ import queryMod from "./memoryQuery.cjs";
 import storeMod from "./memoryStore.cjs";
 import serverMod from "./memoryServer.cjs";
 import answerMod from "./memoryAnswer.cjs";
+import vecMod from "./memoryVectors.cjs";
+import workerMod from "./memoryWorker.cjs";
+import fakes from "./test/memoryFakes.cjs";
 
 const { parseTimeRange, extractKeywords, parseMemoryQuery, searchTermsOf } = queryMod;
 const { createMemoryStore, isExcluded } = storeMod;
 const { createMemoryServer, EXTENSION_ID } = serverMod;
 const { answerQuestion, MEMORY_MODEL, MSG } = answerMod;
+const { createVectorIndex } = vecMod;
+const { createMemoryWorker } = workerMod;
+const { fakeChat, fakeEmbed } = fakes;
 
 // Saturday 2026-10-10, 15:00 local.
 const NOW = new Date(2026, 9, 10, 15, 0, 0);
@@ -70,52 +76,15 @@ function store(now = NOW.getTime()) {
   return { s, setNow: (v) => (t = v) };
 }
 
-describe("memory store (SQLite FTS5)", () => {
-  it("BM25 search with date and domain filters and recency", () => {
-    const { s, setNow } = store();
-    setNow(at(2026, 10, 1));
-    s.ingest({ url: "https://news.example/crispr-old", title: "CRISPR basics", text: "An older piece on CRISPR gene editing." });
-    setNow(at(2026, 10, 9));
-    s.ingest({ url: "https://www.broad.example/base-editing", title: "Base editing beyond CRISPR", text: "CRISPR base editors fix single letters of DNA." });
-    s.ingest({ url: "https://cooking.example/sourdough", title: "Sourdough recipe", text: "Flour, water, salt, starter." });
-    setNow(NOW.getTime());
-    const hits = s.search({ keywords: ["crispr"] });
-    expect(hits.map((h) => h.title)).toEqual(["Base editing beyond CRISPR", "CRISPR basics"]);
-    expect(hits[0].domain).toBe("broad.example");
-    expect(hits[0].snippet).toMatch(/CRISPR/);
-    const yesterday = parseTimeRange("yesterday", NOW);
-    expect(s.search({ keywords: ["recipe"], from: yesterday.from, to: yesterday.to }).map((h) => h.title)).toEqual(["Sourdough recipe"]);
-    expect(s.search({ keywords: ["crispr"], domain: "news.example" }).map((h) => h.title)).toEqual(["CRISPR basics"]);
-    expect(s.search({ keywords: ["qwen"] })).toEqual([]);
-  });
-
-  it("all keywords beat any keyword; #fragments are the same page", () => {
+describe("memory inbox (raw pages, temporary)", () => {
+  it("dedupes the same URL + content within the window; #fragments are the same page", () => {
     const { s } = store();
-    s.ingest({ url: "https://w.example/Genome_editing#Base_editing", title: "Genome editing", text: "Base editing changes one DNA letter." });
-    s.ingest({ url: "https://w.example/Genome_editing", title: "Genome editing", text: "Base editing changes one DNA letter." });
-    s.ingest({ url: "https://w.example/Qwen", title: "Qwen", text: "Qwen base models." });
-    expect(s.stats().count).toBe(2);
-    expect(s.search({ keywords: ["base", "editing"] }).map((h) => h.title)).toEqual(["Genome editing"]);
-    // Stemming: "edited" / "editing" match the indexed "edit".
-    expect(s.search({ keywords: ["edited", "base"] }).map((h) => h.title)).toEqual(["Genome editing"]);
-    expect(s.search({ keywords: ["base", "sourdough"] }).map((h) => h.title).sort()).toEqual(["Genome editing", "Qwen"]); // OR fallback
-  });
-
-  it("drops pages that only mention a keyword in passing", () => {
-    const { s } = store();
-    s.ingest({ url: "https://w.example/genome", title: "Genome editing", text: "Base editing is a form of genome editing. Base editors edit one base. ".repeat(20) });
-    s.ingest({ url: "https://w.example/qwen", title: "Qwen", text: "Qwen base models. ".repeat(40) + " [edit] [edit]" });
-    expect(s.search({ keywords: ["base", "editing"] }).map((h) => h.title)).toEqual(["Genome editing"]);
-  });
-
-  it("dedupes the same URL + content within the window", () => {
-    const { s } = store();
-    const a = s.ingest({ url: "https://a.example/x", title: "X", text: "same" });
+    const a = s.ingest({ url: "https://a.example/x#part", title: "X", text: "same" });
     const b = s.ingest({ url: "https://a.example/x", title: "X", text: "same" });
     expect(b).toMatchObject({ ok: true, deduped: true, id: a.id });
-    expect(s.stats().count).toBe(1);
+    expect(s.stats().queue).toBe(1);
     s.ingest({ url: "https://a.example/x", title: "X", text: "changed" });
-    expect(s.stats().count).toBe(2);
+    expect(s.stats().queue).toBe(2);
   });
 
   it("never stores banking, email, health, password-manager or excluded sites", () => {
@@ -126,32 +95,35 @@ describe("memory store (SQLite FTS5)", () => {
     s.setSettings({ excluded: ["https://www.reddit.com/r/x", "news.example"] });
     expect(isExcluded("https://old.reddit.com/r/y", s.settings().excluded)).toBe(true);
     expect(s.ingest({ url: "https://sub.news.example/a", title: "t", text: "x" }).reason).toBe("excluded");
-    expect(s.stats().count).toBe(0);
+    expect(s.stats().queue).toBe(0);
   });
 
-  it("retention and the size cap evict oldest first", () => {
-    const { s, setNow } = store();
-    setNow(at(2026, 6, 1));
-    s.ingest({ url: "https://a.example/old", title: "Old", text: "old" });
-    setNow(NOW.getTime());
-    s.ingest({ url: "https://a.example/new", title: "New", text: "new" });
-    s.setSettings({ retentionDays: 90 });
-    expect(s.list().map((p) => p.title)).toEqual(["New"]);
-    s.setSettings({ sizeCapMB: 10 });
-    expect(s.settings().sizeCapMB).toBe(10);
-  });
-
-  it("delete one, delete everything, rotate token", () => {
+  it("retention is gone (monthly compaction + the size cap decide); the cap defaults to 500 MB", () => {
     const { s } = store();
-    const a = s.ingest({ url: "https://a.example/1", title: "One", text: "1" });
-    s.ingest({ url: "https://a.example/2", title: "Two", text: "2" });
-    expect(s.remove(a.id)).toBe(true);
-    expect(s.search({ keywords: ["one"] })).toEqual([]);
+    expect(s.settings()).not.toHaveProperty("retentionDays");
+    expect(s.settings().sizeCapMB).toBe(500);
+    expect(s.settings().keepShrinking).toBe(false);
+    s.setSettings({ sizeCapMB: 10, keepShrinking: true });
+    expect(s.settings()).toMatchObject({ sizeCapMB: 10, keepShrinking: true });
+  });
+
+  it("delete everything, rotate token", () => {
+    const { s } = store();
+    s.ingest({ url: "https://a.example/1", title: "One", text: "1" });
+    s.insertMemory({ title: "M", gist: "A memory about one thing.", urls: [{ url: "https://a.example/1", title: "One" }], first_seen: NOW.getTime() });
     s.clear();
-    expect(s.stats().count).toBe(0);
+    expect(s.stats()).toMatchObject({ count: 0, queue: 0 });
     const t1 = s.settings().token;
     expect(t1.length).toBeGreaterThan(20);
     expect(s.setSettings({ rotateToken: true }).token).not.toBe(t1);
+  });
+
+  it("time on page from the extension adds up", () => {
+    const { s } = store();
+    s.ingest({ url: "https://a.example/read", title: "Read", text: "text" });
+    expect(s.addVisitTime("https://a.example/read#x", 90)).toBe(true);
+    expect(s.inboxNext().seconds).toBe(90);
+    expect(s.addVisitTime("https://unknown.example/", 30)).toBe(false);
   });
 });
 
@@ -188,7 +160,10 @@ describe("ingest server: token + origin + host + size", () => {
     const ok = await call("/ingest", { body: page });
     expect(ok.status).toBe(200);
     expect(ok.headers.get("access-control-allow-origin")).toBe(ORIGIN);
-    expect(s.stats().count).toBe(1);
+    expect(s.stats().queue).toBe(1);
+    const visit = await call("/visit", { body: { url: page.url, seconds: 45 } });
+    expect(await visit.json()).toEqual({ ok: true });
+    expect(s.inboxNext().seconds).toBe(45);
   });
 
   it("rejects other origins (and never sends a CORS wildcard)", async () => {
@@ -198,7 +173,7 @@ describe("ingest server: token + origin + host + size", () => {
       expect(r.status).toBe(403);
       expect(r.headers.get("access-control-allow-origin")).toBe(null);
     }
-    expect(s.stats().count).toBe(0);
+    expect(s.stats().queue).toBe(0);
   });
 
   it("refuses oversized bodies, Memory off, and paused", async () => {
@@ -208,7 +183,7 @@ describe("ingest server: token + origin + host + size", () => {
     expect((await call("/ingest", { body: page })).status).toBe(409);
     s.setSettings({ paused: false, enabled: false });
     expect((await call("/ingest", { body: page })).status).toBe(409);
-    expect(s.stats().count).toBe(0);
+    expect(s.stats().queue).toBe(0);
   });
 
   it("no Origin (Chrome omits it on some extension GETs): allowed only with our X-Rocky-Extension id", async () => {
@@ -233,9 +208,19 @@ describe("ingest server: token + origin + host + size", () => {
   });
 });
 
-describe("ingest -> search -> answer (fake extension POSTs, fake Ollama)", () => {
-  it("answers from the retrieved snippets only and lists the sources", async () => {
+describe("extension POST -> inbox -> gist -> answer (fake Ollama)", () => {
+  // Enough words to be gisted; each page padded with its own text only.
+  const long = (t) => `${t} `.repeat(8);
+  async function pipeline() {
     const { s } = store();
+    const index = createVectorIndex();
+    const chat = fakeChat();
+    const worker = createMemoryWorker({ store: s, index, chat, embed: fakeEmbed, now: () => NOW.getTime() }, { perMinute: 100 });
+    return { s, index, chat, worker };
+  }
+
+  it("pages posted by the extension are gisted, the raw text goes, and answers cite the memory", async () => {
+    const { s, index, chat, worker } = await pipeline();
     const srv = createMemoryServer({ store: s, port: 0 });
     const port = await srv.start();
     const post = (body) =>
@@ -244,60 +229,56 @@ describe("ingest -> search -> answer (fake extension POSTs, fake Ollama)", () =>
         headers: { Origin: `chrome-extension://${EXTENSION_ID}`, Authorization: `Bearer ${s.settings().token}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-    await post({ url: "https://qwen.example/blog", title: "Qwen 3.5 release", text: "Qwen 3.5 2B runs on a laptop and supports tool calls." });
-    await post({ url: "https://cooking.example/pasta", title: "Pasta", text: "Boil water." });
+    await post({ url: "https://qwen.example/blog", title: "Qwen 3.5 release", text: long("Qwen 3.5 2B runs on a laptop and supports tool calls.") });
+    await post({ url: "https://cooking.example/pasta", title: "Pasta night", text: long("Boil salted water and cook the pasta until al dente.") });
     await srv.stop();
-    const seen = [];
-    const chat = async (req) => {
-      seen.push(req);
-      return "Qwen 3.5 2B runs on a laptop, from the Qwen 3.5 release post.";
-    };
-    const r = await answerQuestion("what did I read about Qwen?", { store: s, chat, now: () => NOW });
+    while (!(await worker.processOne()).idle);
+    expect(s.stats()).toMatchObject({ queue: 0, count: 2 });
+    expect(s.bytes().inbox).toBe(0);
+    const r = await answerQuestion("what did I read about Qwen?", { store: s, index, chat, embed: fakeEmbed, now: () => NOW });
     expect(r.status).toBe("answered");
-    expect(r.answer).toMatch(/Qwen 3.5 2B/);
     expect(r.sources.map((x) => x.domain)).toEqual(["qwen.example"]);
-    expect(seen[0].messages[1].content).toMatch(/Qwen 3.5 release/);
-    expect(seen[0].messages[1].content).not.toMatch(/Pasta/);
-  });
-
-  it("lists a redirected page once", async () => {
-    const { s } = store();
-    s.ingest({ url: "https://en.wikipedia.org/wiki/Base_editing", title: "Genome editing - Wikipedia", text: "Base editing changes one DNA letter." });
-    s.ingest({ url: "https://en.wikipedia.org/wiki/Genome_editing", title: "Genome editing - Wikipedia", text: "Base editing changes one DNA letter. More." });
-    const r = await answerQuestion("what did I read about base editing", { store: s, chat: async () => "Base editing changes one DNA letter.", now: () => NOW });
-    expect(r.sources).toHaveLength(1);
+    const asked = chat.calls.find((c) => c.kind === "answer").req.messages[1].content;
+    expect(asked).toMatch(/Qwen 3.5 release/);
+    expect(asked).not.toMatch(/Pasta/);
   });
 
   it("plain one-line messages: off, nothing found, Ollama down, model unsure", async () => {
-    const { s } = store();
-    s.ingest({ url: "https://qwen.example/blog", title: "Qwen", text: "Qwen notes" });
-    expect((await answerQuestion("what did I read about qwen", { store: s, chat: async () => "x", now: () => NOW })).status).toBe("answered");
-    expect(await answerQuestion("what did I read about rust", { store: s, chat: async () => "x", now: () => NOW })).toMatchObject({ status: "none", sources: [] });
-    const down = await answerQuestion("what did I read about qwen", { store: s, chat: async () => { throw new Error("ECONNREFUSED"); }, now: () => NOW });
+    const { s, index, chat, worker } = await pipeline();
+    s.ingest({ url: "https://qwen.example/blog", title: "Qwen notes", text: long("Qwen notes about small local models and quantization.") });
+    while (!(await worker.processOne()).idle);
+    const deps = (c) => ({ store: s, index, chat: c, embed: fakeEmbed, now: () => NOW });
+    expect((await answerQuestion("what did I read about qwen", deps(chat))).status).toBe("answered");
+    expect(await answerQuestion("what did I read about rust compilers", deps(chat))).toMatchObject({ status: "none", sources: [] });
+    const down = await answerQuestion("what did I read about qwen", deps(async () => { throw new Error("ECONNREFUSED"); }));
     expect(down).toMatchObject({ status: "unavailable", answer: MSG.ollama });
     expect(down.sources).toHaveLength(1);
-    const unsure = await answerQuestion("what did I read about qwen", { store: s, chat: async () => "I couldn't find that.", now: () => NOW });
+    const unsure = await answerQuestion("what did I read about qwen", deps(async () => "I couldn't find that."));
     expect(unsure).toMatchObject({ status: "none", answer: MSG.partial });
-    expect(unsure.sources).toHaveLength(1); // the matching page is still shown, nothing invented
+    expect(unsure.sources).toHaveLength(1);
     s.setSettings({ enabled: false });
-    expect(await answerQuestion("what did I read about qwen", { store: s, now: () => NOW })).toMatchObject({ status: "off", answer: "Memory is off. Turn it on in the Memory page." });
+    expect(await answerQuestion("what did I read about qwen", deps(chat))).toMatchObject({ status: "off", answer: "Memory is off. Turn it on in the Memory page." });
   });
 
   it("'what did I search for on Tuesday' is answered in code, no model", async () => {
     let t = at(2026, 10, 6, 9);
     const s = createMemoryStore({ now: () => t });
     s.setSettings({ enabled: true });
+    const index = createVectorIndex();
+    const worker = createMemoryWorker({ store: s, index, chat: async () => { throw new Error("must not be called"); }, embed: fakeEmbed, now: () => t });
     s.ingest({ url: "https://www.google.com/search?q=cheap+flights+to+goa", title: "cheap flights to goa - Google Search", text: "results" });
+    await worker.processOne();
     t = at(2026, 10, 7, 9);
     s.ingest({ url: "https://www.google.com/search?q=wednesday+thing", title: "wednesday thing - Google Search", text: "results" });
+    await worker.processOne();
     t = NOW.getTime();
-    const r = await answerQuestion("what did I search for on Tuesday?", { store: s, chat: async () => { throw new Error("must not be called"); }, now: () => NOW });
+    const r = await answerQuestion("what did I search for on Tuesday?", { store: s, index, chat: async () => { throw new Error("must not be called"); }, embed: fakeEmbed, now: () => NOW });
     expect(r).toMatchObject({ status: "answered", answer: 'Tuesday you searched for "cheap flights to goa".' });
   });
 });
 
 describe("privacy: Memory never touches the cloud", () => {
-  const files = ["memoryStore.cjs", "memoryServer.cjs", "memoryQuery.cjs", "memoryAnswer.cjs"];
+  const files = ["memoryStore.cjs", "memoryServer.cjs", "memoryQuery.cjs", "memoryAnswer.cjs", "memoryGist.cjs", "memoryVectors.cjs", "memoryWorker.cjs", "memorySearch.cjs", "memoryCompact.cjs"];
   const src = (f) => fs.readFileSync(path.join(import.meta.dirname, f), "utf8");
 
   it("imports nothing but node built-ins and each other", () => {

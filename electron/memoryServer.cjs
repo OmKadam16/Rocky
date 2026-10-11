@@ -28,7 +28,7 @@ function tokenOk(header, token) {
 
 /**
  * opts: { store, extensionId?, host?, port, maxBody? }
- * store: { ingest(item), stats(), settings() } (memoryStore)
+ * store: { ingest(item), addVisitTime(url, seconds), stats(), settings() } (memoryStore)
  */
 function createMemoryServer(opts) {
   const extensionId = opts.extensionId || EXTENSION_ID;
@@ -75,7 +75,8 @@ function createMemoryServer(opts) {
     if (req.method === "GET" && url.pathname === "/status") {
       return send(res, 200, { ok: true, enabled: s.enabled, paused: s.paused, count: opts.store.stats().count, excluded: s.excluded }, origin);
     }
-    if (req.method === "POST" && url.pathname === "/ingest") {
+    // /ingest: a page for the inbox. /visit: time spent on a page ({ url, seconds }).
+    if (req.method === "POST" && (url.pathname === "/ingest" || url.pathname === "/visit")) {
       const declared = Number(req.headers["content-length"] || 0);
       if (declared > maxBody) {
         req.resume();
@@ -105,7 +106,11 @@ function createMemoryServer(opts) {
           return send(res, 400, { ok: false, error: "bad json" }, origin);
         }
         try {
-          send(res, 200, opts.store.ingest(item), origin);
+          const out =
+            url.pathname === "/visit"
+              ? { ok: Boolean(opts.store.addVisitTime && opts.store.addVisitTime(item && item.url, item && item.seconds)) }
+              : opts.store.ingest(item);
+          send(res, 200, out, origin);
         } catch {
           // Never echo or log page content.
           send(res, 500, { ok: false, error: "store failed" }, origin);
