@@ -51,6 +51,8 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
     saveTab(t);
   };
   const viewport = useVisualViewport();
+  // Applies the saved light/dark theme on the phone from the first paint.
+  useTheme();
   const { day, week, now, loading, error, refresh } = useSchedule(selected);
   void now;
 

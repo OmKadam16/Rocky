@@ -22,3 +22,5 @@ landing/
 # Built Chrome extension (npm run build:extension)
 extension/dist
 release-*
+# Phone screenshot harness output (npm run screens:phone)
+test-results/

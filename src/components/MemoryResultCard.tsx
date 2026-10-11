@@ -25,9 +25,9 @@ export default function MemoryResultCard({ status, answer, sources, relayed, not
   };
   return (
     <div className="rounded-[4px] border border-line bg-card px-[16px] py-[14px]">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-micro tracking-tab uppercase text-grey">From your Memory</span>
-        <span className="font-mono text-micro tracking-tab uppercase text-grey-mid">{relayed ? "From your laptop" : "On this laptop"}</span>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="whitespace-nowrap font-mono text-micro tracking-tab uppercase text-grey">From your Memory</span>
+        <span className="whitespace-nowrap font-mono text-micro tracking-tab uppercase text-grey-mid">{relayed ? "From your laptop" : "On this laptop"}</span>
       </div>
       <div className={`mt-[8px] text-15 leading-[1.5] ${status === "answered" ? "text-ink" : "text-ink-muted"} [text-wrap:pretty]`}>{answer}</div>
       {sources.length > 0 && (

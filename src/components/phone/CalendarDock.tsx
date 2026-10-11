@@ -38,9 +38,12 @@ export default function CalendarDock({ assistant, onOpenChat }: { assistant: Ass
   const listening = assistant.state === "listening";
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-stretch gap-2 px-5 pb-3">
+    // In the flow above the tab bar: a pending card or an error takes real
+    // space (the list shrinks and still scrolls). The toast and the mic float
+    // just above it.
+    <div className={`relative z-30 flex flex-none flex-col items-stretch gap-2 px-5 ${assistant.error || pending ? "pb-3 pt-2" : ""}`}>
       {assistant.error && (
-        <div className="pointer-events-auto rounded-[3px] border border-warm-line bg-warm-soft px-3 py-2 font-mono text-meta leading-[1.5] text-ink-soft">{assistant.error}</div>
+        <div className="rounded-[3px] border border-warm-line bg-warm-soft px-3 py-2 font-mono text-meta leading-[1.5] text-ink-soft">{assistant.error}</div>
       )}
       {pending === "agent" && (
         <div className="pointer-events-auto">
@@ -60,7 +63,7 @@ export default function CalendarDock({ assistant, onOpenChat }: { assistant: Ass
           </div>
         </div>
       )}
-      <div className="flex items-end gap-3">
+      <div className="pointer-events-none absolute inset-x-5 bottom-full mb-3 flex items-end gap-3">
         <div className="min-w-0 flex-1" aria-live="polite">
           <AnimatePresence initial={false}>
             {!pending && toast.visible && replyText && assistant.state !== "thinking" && (
