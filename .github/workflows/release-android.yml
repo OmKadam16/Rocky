@@ -86,14 +86,14 @@ jobs:
           (cd dist && zip -qr ../dist.zip .)
           node scripts/android-release-files.mjs android/app/build/outputs/apk/release/app-release.apk dist.zip out
           rm -f "$RUNNER_TEMP/rocky-release.jks"
-      - uses: softprops/action-gh-release@v3
-        with:
-          repository: OmKadam16/rocky-android-releases
-          token: ${{ secrets.RELEASES_REPO_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: Rocky ${{ github.ref_name }}
-          make_latest: true
-          files: |
-            out/*.apk
-            out/dist.zip
-            out/android-update.json
+      # gh instead of softprops/action-gh-release: its errors say plainly
+      # what failed (401/403/404 with a message) instead of "Too many retries".
+      - name: Publish to rocky-android-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo OmKadam16/rocky-android-releases \
+            --title "Rocky ${GITHUB_REF_NAME}" \
+            --latest \
+            out/*.apk out/dist.zip out/android-update.json
