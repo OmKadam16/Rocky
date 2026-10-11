@@ -44,7 +44,7 @@ jobs:
           status=${PIPESTATUS[0]}
           if [ $status -ne 0 ]; then
             # The reason, as one public annotation (logs need a login to read).
-            msg=$(grep -E "^e: |error:|What went wrong|Could not|> |FAILED|Exception" gradle.log | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            msg=$( (grep -E "^e: |^w: .*error|error:|FAILED" gradle.log | head -25; grep -A14 "What went wrong" gradle.log | head -40) | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=Gradle failed::${msg}"
           fi
           exit $status

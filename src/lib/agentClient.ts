@@ -142,8 +142,22 @@ type DesktopAgentBridge = {
   onEvent: (handler: (e: AgentEvent) => void) => () => void;
 };
 
+/** The Android app's on-phone agent (agentAndroid.ts), when the APK has it. */
+let nativeAgent: DesktopAgentBridge | null = null;
+
 const desktop = (): DesktopAgentBridge | null =>
-  (typeof window !== "undefined" && (window as unknown as { rocky?: { agent?: DesktopAgentBridge } }).rocky?.agent) || null;
+  (typeof window !== "undefined" && (window as unknown as { rocky?: { agent?: DesktopAgentBridge } }).rocky?.agent) || nativeAgent;
+
+/**
+ * The Android app registers its on-phone agent here at start: from then on
+ * it is the local agent (no laptop needed); without it the phone relays to
+ * the laptop as before.
+ */
+export function setLocalAgentBridge(b: DesktopAgentBridge | null) {
+  nativeAgent = b;
+  wired = false;
+  ensureWired();
+}
 
 let relay: AgentBackend | null = null;
 let view: AgentView = IDLE;

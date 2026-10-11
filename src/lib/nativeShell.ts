@@ -53,4 +53,5 @@ export function installNativeShell(): void {
   new MutationObserver(syncBars).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
   void import("./appUpdateNative").then((m) => m.startNativeUpdates()).catch(() => {});
+  void import("./agentAndroidInstall").then((m) => m.installAndroidAgent()).catch(() => {});
 }

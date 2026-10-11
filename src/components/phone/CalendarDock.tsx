@@ -5,6 +5,7 @@ import { useAgentView } from "../../hooks/useAgentView";
 import { ensureAudioUnlocked } from "../../lib/speech";
 import { calendarPending, needsConfirm as computeNeedsConfirm, TOAST_MS, toastReducer } from "../../lib/phoneTabs";
 import AgentCard from "../AgentCard";
+import ShowAgentBrowser from "./ShowAgentBrowser";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -48,6 +49,7 @@ export default function CalendarDock({ assistant, onOpenChat }: { assistant: Ass
       {pending === "agent" && (
         <div className="pointer-events-auto">
           <AgentCard agent={agent} onSend={(t) => void assistant.send(t)} compact />
+          <ShowAgentBrowser phase={agent.phase} />
         </div>
       )}
       {pending === "confirm" && (

@@ -10,6 +10,7 @@ import AgentCard from "../AgentCard";
 import ChatCardView from "../ChatCards";
 import ChatMemoryPanel, { memoryEntryCount, useChatMemory } from "../ChatMemoryPanel";
 import LaptopChip, { SettingsButton } from "./LaptopChip";
+import ShowAgentBrowser from "./ShowAgentBrowser";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -151,6 +152,7 @@ export default function PhoneChat({
         {agent.phase !== "idle" && (
           <div className="border-l-2 border-accent-line pl-3">
             <AgentCard agent={agent} onSend={(t) => void assistant.send(t)} />
+            <ShowAgentBrowser phase={agent.phase} />
           </div>
         )}
       </div>
