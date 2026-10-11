@@ -120,7 +120,7 @@ describe("planner speed and prompt", () => {
   it("GPT-5 models on OpenAI run at low reasoning effort; others untouched", () => {
     expect(speedParams("OpenAI", "gpt-5-nano")).toEqual({ reasoning_effort: "low", verbosity: "low" });
     expect(speedParams("OpenAI", "gpt-5.4-mini")).toEqual({ reasoning_effort: "low", verbosity: "low" });
-    expect(speedParams("OpenAI", "gpt-5.5")).toEqual({ reasoning_effort: "low", verbosity: "low" });
+    expect(speedParams("OpenAI", "gpt-5.5")).toEqual({ reasoning_effort: "none", verbosity: "low" });
     expect(speedParams("OpenAI", "gpt-4o")).toEqual({});
     expect(speedParams("Gemini", "gemini-3.5-flash")).toEqual({});
   });

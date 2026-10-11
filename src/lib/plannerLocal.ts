@@ -28,8 +28,13 @@ const MAX_TOOL_ROUNDS = 8;
  * the model free windows and a plain-text calendar, and the tools check
  * everything in code. Other providers / models get nothing extra.
  */
-export function speedParams(provider: string, model: string): { reasoning_effort?: "low"; verbosity?: "low" } {
+export function speedParams(provider: string, model: string): { reasoning_effort?: "low" | "none"; verbosity?: "low" } {
   if (provider !== "OpenAI" || !/^gpt-5/i.test(model)) return {};
+  // gpt-5.5 rejects function tools in chat completions whenever
+  // reasoning_effort is set — the API itself says to use 'none' (or move to
+  // /v1/responses, which the booking agent already uses). 'none' also keeps
+  // turns fast: the context hands the model everything, tools check the rest.
+  if (/^gpt-5\.5/i.test(model)) return { reasoning_effort: "none", verbosity: "low" };
   return { reasoning_effort: "low", verbosity: "low" };
 }
 
