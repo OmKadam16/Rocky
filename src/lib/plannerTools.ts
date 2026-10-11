@@ -22,6 +22,8 @@ import {
 } from "./scheduling";
 import type { FixedCommitmentRow, PreferencesRow, ScheduledBlockRow, TaskRow } from "../../shared/db";
 import { BOOKING_TOOL_SCHEMAS, runBookingTool } from "./bookingTools";
+import { COMMITMENT_TOOL_SCHEMAS, runCommitmentTool } from "./commitmentTools";
+import { snapshotIfCapturing } from "./undoJournal";
 import {
   WEEKDAY_LONG,
   addDays,
@@ -359,6 +361,7 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
     },
   },
   ...BOOKING_TOOL_SCHEMAS,
+  ...COMMITMENT_TOOL_SCHEMAS,
 ];
 
 /**
@@ -618,7 +621,12 @@ async function insertBlock(row: Omit<ScheduledBlockRow, "id" | "created_at" | "p
 }
 
 /** Runs one tool call and returns a JSON-serialisable result for the model. */
+/** Agent handoffs: they change nothing in the calendar themselves. */
+const NO_SNAPSHOT = new Set(["book_appointment", "answer_agent_question", "continue_agent"]);
+
 export async function runTool(name: string, args: Args, ctx?: ToolContext): Promise<unknown> {
+  // Undo for the last action: the turn's first calendar change snapshots first.
+  if (MUTATING_TOOLS.has(name) && !NO_SNAPSHOT.has(name)) await snapshotIfCapturing();
   switch (name) {
     case "get_week_schedule":
       return weekSchedule(args.start_date);
@@ -1273,6 +1281,11 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       await db.tasks.update(task.id, { status } as any);
       return { updated: true, task: { id: task.id, name: task.name, status } };
     }
+
+    case "propose_commitment":
+    case "propose_commitment_change":
+    case "propose_commitment_removal":
+      return runCommitmentTool(name, args);
 
     case "find_place":
     case "propose_booking":

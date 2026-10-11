@@ -6,6 +6,7 @@ import { getSecret } from "./secrets";
 import { SYSTEM_PROMPT } from "./plannerPrompt";
 import { MUTATING_TOOLS, contextSnapshot, runTool, toolSchemas } from "./plannerTools";
 import { BOOKING_TOOL_NAMES, agentWaitingContext } from "./bookingTools";
+import { COMMITMENT_TOOL_NAMES } from "./commitmentTools";
 import { isAgentActive } from "./agentClient";
 import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
 import type { AssistantTurn } from "../types";
@@ -224,12 +225,22 @@ export async function askPlannerLocal(
       if (calls.length === 0) {
         const reply = choice.content?.trim() || "Got it.";
         const changed = toolsUsed.some((t) => MUTATING_TOOLS.has(t.name));
+        // A commitment card counts as acting (the user confirms it on screen),
+        // so the did-nothing guards leave it alone.
+        const proposed = toolsUsed.some(
+          (t) => (COMMITMENT_TOOL_NAMES as readonly string[]).includes(t.name) && Boolean((t.result as { proposal_id?: unknown } | null)?.proposal_id),
+        );
+        const acted = changed || proposed;
+        // Nothing is saved until Confirm: never let "added" / "saved" reach the user.
+        if (proposed && CLAIMS_A_CHANGE.test(reply)) {
+          return { reply: "Here it is — tap Confirm or say yes.", tools_used: toolsUsed, schedule_changed: changed, timing: stamp() };
+        }
 
         // Refused without changing anything, so nothing has verified the claim.
         // Read-only calls don't count: it can fetch the week and still get the
         // arithmetic wrong, which is exactly the failure this catches.
         if (
-          !changed &&
+          !acted &&
           !nudgedRefusal &&
           REFUSES_WITHOUT_CHECKING.test(reply) &&
           !NO_CONFLICT.test(reply)
@@ -256,7 +267,7 @@ export async function askPlannerLocal(
 
         // Refused twice over a window the calendar says is empty. Passing the
         // reply on would tell the user their evening is booked when it is not.
-        if (!changed && nudgedRefusal && provablyFree && requested && REFUSES_WITHOUT_CHECKING.test(reply) && !NO_CONFLICT.test(reply)) {
+        if (!acted && nudgedRefusal && provablyFree && requested && REFUSES_WITHOUT_CHECKING.test(reply) && !NO_CONFLICT.test(reply)) {
           return {
             reply: `That time's actually clear — there's nothing on ${requested.date === snapshot.today ? "today" : "that day"} then. I couldn't get it placed though, so say it once more.`,
             tools_used: toolsUsed,
@@ -267,7 +278,7 @@ export async function askPlannerLocal(
 
         // It said it did something but called nothing. Give it one chance to
         // actually do it, then refuse to pass the claim on.
-        if (!changed && (CLAIMS_A_CHANGE.test(reply) || PROMISES_A_CHANGE.test(reply))) {
+        if (!acted && (CLAIMS_A_CHANGE.test(reply) || PROMISES_A_CHANGE.test(reply))) {
           if (!nudgedClaim) {
             nudgedClaim = true;
             forceTool = true;

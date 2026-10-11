@@ -228,10 +228,14 @@ Goal: one chat on the Dashboard handles commitments, calendar/tasks, bookings an
       unchanged. Same assistant (useAssistant), typed + mic, listening/thinking state.
 - [x] Chat history local only (separate Dexie DB `RockyChat`, last 200, Clear chat). Private
       turns (Memory, receipts) never go to the cloud planner (`plannerHistory`, tested).
-- [ ] Commitments by chat: `propose_commitment` / change / removal → CommitmentCard
-      (Confirm / Edit / Cancel); only Confirm or a spoken yes (code fast path) writes.
-- [ ] Booking cards inline (live AgentCard in the thread) + "added to your calendar" receipts
-      with Undo for the last action.
+- [x] Commitments by chat: `propose_commitment` / `_change` / `_removal` → CommitmentCard
+      (Confirm / Edit inline / Cancel, conflicts on the card); only Confirm or the user's own
+      yes (code fast path, latest pending card only) writes; idempotent; one question at a time,
+      never invented times. Tests: no write on propose, write once, double-confirm, cancel,
+      conflicts, weekday recurrence + active_until, spoken yes.
+- [x] Booking cards inline (live AgentCard at the end of the thread; answers by voice or typing)
+      + "added to your calendar" receipts with Undo for the last action (per-turn snapshot diff,
+      only the latest is undoable; tested).
 
 ### Phase 10: Memory + Chrome extension (all local)
 Goal: "what did I read about X" works from pages the user actually visited; nothing leaves
@@ -348,3 +352,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
 - 2026-10-10: Retrying a booking reuses its earlier failed/unclear hold instead of reporting a clash with it (the in-memory draft doesn't survive an app restart). 136 unit tests. Installer rebuilt and reinstalled.
 - 2026-10-10: Booking Agent v2 speed, reassurance and OTP: per-step timing + run summary (debug readout); event-based settle, JPEG shots, pre-opened start page, planner-free answers, TTS prefetch (local overhead per acting step on the E2E fixture ~594ms → ~350-410ms; model time not measurable here, see report); spoken progress updates with the new Profile → Voice setting (no migration); booking-contact verification codes typed by code, never stored or relayed. 174 unit tests + 28-check E2E. Installer rebuilt and reinstalled.
 - 2026-10-10: Phase 9 started: Dashboard is now Sidebar | universal chat | selected day (chat-only under 1100px), chat history in a local-only Dexie DB (last 200, Clear chat), private turns never reach the cloud planner. Old DashboardPage removed.
+- 2026-10-10: Phase 9 done: commitments by chat (propose → confirm card, code-enforced confirm), receipts with Undo for the last action, booking card inline in the chat.

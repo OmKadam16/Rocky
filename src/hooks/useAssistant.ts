@@ -6,6 +6,9 @@ import { answerAgent, cancelAgent, confirmAgent, continueAgent, getAgentView, is
 import { loadProgressSpeech, progressSpeechOn } from "../lib/progressSetting";
 import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHistory";
+import { commitmentCardFromTools, pendingProposalId } from "../lib/chatCards";
+import { cancelProposal, commitmentReply, confirmProposal, receiptText } from "../lib/commitmentProposals";
+import { beginCapture, endCapture, registerUndo, runUndo } from "../lib/undoJournal";
 
 export const DEFAULT_SILENCE_MS = 1200;
 export const SILENCE_STORAGE_KEY = "vc-silence-ms";
@@ -209,6 +212,29 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
     if (persist) await clearStoredChat();
   }, [persist]);
 
+  /** The only way a chat commitment gets written: the card's Confirm or the user's own yes. */
+  const confirmCommitment = useCallback(
+    async (id: string): Promise<string> => {
+      const r = await confirmProposal(id);
+      if (!r.ok) return r.error ?? "That didn't save.";
+      if (r.already || !r.proposal) return "Already saved.";
+      const undoId = r.undo ? registerUndo(r.undo) : null;
+      push({ role: "assistant", text: "", private: true, card: { kind: "receipt", text: receiptText(r.proposal), undoId } });
+      onScheduleChange();
+      return r.proposal.op === "delete" ? "Removed." : "Saved.";
+    },
+    [push, onScheduleChange],
+  );
+  const cancelCommitment = useCallback((id: string) => cancelProposal(id), []);
+  const undo = useCallback(
+    async (undoId: string) => {
+      const ok = await runUndo(undoId);
+      if (ok) onScheduleChange();
+      return ok;
+    },
+    [onScheduleChange],
+  );
+
   const send = useCallback(
     async (text: string, opts?: SendOpts) => {
       const speakReply = opts?.speak !== false;
@@ -232,7 +258,20 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
           }
           return;
         }
+        // A yes / no to the commitment card on screen is handled here, in code:
+        // the planner can never write a commitment.
+        const reply = commitmentReply(text, pendingProposalId(turnsRef.current.slice(0, -1)));
+        if (reply) {
+          const line = reply.action === "confirm" ? await confirmCommitment(reply.id) : (cancelProposal(reply.id), "Cancelled — nothing saved.");
+          push({ role: "assistant", text: line });
+          if (speakReply) {
+            setState("speaking");
+            await speak(line).catch(() => {});
+          }
+          return;
+        }
         let response;
+        beginCapture();
         try {
           response = await askPlanner(text, turnsRef.current.slice(0, -1));
         } catch (failure) {
@@ -243,10 +282,14 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
           const message = failure instanceof Error ? failure.message : String(failure);
           setError(message);
           push({ role: "assistant", text: `I couldn't reach the planner — ${message}` });
+          await endCapture();
           return;
         }
         // Planner succeeded — the text reply stays visible even if voice fails.
-        push({ role: "assistant", text: response.reply });
+        const card = commitmentCardFromTools(response.tools_used);
+        push({ role: "assistant", text: response.reply, ...(card ? { card } : {}) });
+        const receipt = await endCapture();
+        if (receipt) push({ role: "assistant", text: "", private: true, card: { kind: "receipt", text: receipt.text, undoId: receipt.undoId } });
         if (response.schedule_changed) onScheduleChange();
         const base: AssistantTiming = {
           plannerMs: response.timing.totalMs,
@@ -295,7 +338,7 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
         setState("idle");
       }
     },
-    [onScheduleChange, push],
+    [onScheduleChange, push, confirmCommitment],
   );
 
   /**
@@ -522,6 +565,9 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
   return {
     pushTurn: push,
     clearChat,
+    confirmCommitment,
+    cancelCommitment,
+    undo,
     state,
     turns,
     caption,
