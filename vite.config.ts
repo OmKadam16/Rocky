@@ -10,5 +10,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: process.env.PORT ? Number(process.env.PORT) : 8080,
+    // The installer build writes (and locks) files here; watching them
+    // crashed a running dev server with EBUSY.
+    watch: { ignored: ["**/release/**", "**/dist-electron/**"] },
   },
 });
