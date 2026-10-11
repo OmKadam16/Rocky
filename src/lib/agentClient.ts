@@ -20,8 +20,23 @@ import { finalHoldTitle, type AgentTask } from "./bookingTask";
 import { saveBookingRecord } from "./bookingRecords";
 import { getSecret } from "./secrets";
 
+/** One agent step (one model round trip and what it did), in ms. */
+export type AgentStepTiming = { n: number; screenshotMs: number; modelMs: number; actionMs: number; settleMs: number; navMs: number; shotKb: number; totalMs: number };
+export type AgentTimingSummary = {
+  steps: number;
+  totalMs: number;
+  avgStepMs: number;
+  avgModelMs: number;
+  avgScreenshotMs: number;
+  avgActionMs: number;
+  avgSettleMs: number;
+  navMs: number;
+  maxStepMs: number;
+};
+
 export type AgentEvent =
   | { type: "status"; state: string; text: string; at?: number }
+  | { type: "timing"; step: AgentStepTiming; summary: AgentTimingSummary; at?: number }
   | { type: "step"; n: number; text: string; blocked?: boolean; at?: number }
   | { type: "question"; question: string; field: string; at?: number }
   | { type: "needs_confirmation"; kind: "final" | "safety"; summary: string; screenshot: string | null; at?: number }
@@ -36,10 +51,11 @@ export type AgentEvent =
       screenshot: string | null;
       holdBlockId: string | null;
       task?: { type: string; venue: string; date: string; time: string };
+      timing?: AgentTimingSummary;
       at?: number;
     }
-  | { type: "failed"; reason: string; url?: string; lastStep?: string; holdBlockId: string | null; at?: number }
-  | { type: "cancelled"; message: string; holdBlockId: string | null; at?: number };
+  | { type: "failed"; reason: string; url?: string; lastStep?: string; holdBlockId: string | null; timing?: AgentTimingSummary; at?: number }
+  | { type: "cancelled"; message: string; holdBlockId: string | null; timing?: AgentTimingSummary; at?: number };
 
 export type AgentPhase = "idle" | "starting" | "running" | "question" | "confirm" | "takeover" | "done" | "failed" | "cancelled";
 
@@ -63,6 +79,8 @@ export type AgentView = {
   remote: boolean;
   /** Laptop: "phone" when the phone started this run (the phone does the talking). */
   origin: "here" | "phone";
+  /** Laptop only, for the hidden debug readout: last step + run averages. */
+  timing: { last: AgentStepTiming | null; summary: AgentTimingSummary | null };
 };
 
 const IDLE: AgentView = {
@@ -80,6 +98,7 @@ const IDLE: AgentView = {
   seq: 0,
   remote: false,
   origin: "here",
+  timing: { last: null, summary: null },
 };
 
 export type AgentBackend = {
@@ -195,6 +214,8 @@ export function reduceAgentEvent(v: AgentView, e: AgentEvent): AgentView {
   switch (e.type) {
     case "status":
       return { ...v, status: e.text, phase: e.state === "running" ? "running" : v.phase };
+    case "timing":
+      return { ...v, timing: { last: e.step, summary: e.summary } };
     case "step":
       return { ...v, log: [...v.log, { text: e.text, blocked: Boolean(e.blocked) }].slice(-60) };
     case "question":

@@ -376,6 +376,13 @@ function createAgentController(deps, options = {}) {
   }
 
   function emit(e) {
+    if (e.type === "timing") {
+      const t = e.step;
+      console.log(`[agent] step ${t.n}: total ${t.totalMs}ms (model ${t.modelMs}, screenshot ${t.screenshotMs}, action ${t.actionMs}, settle ${t.settleMs}, nav ${t.navMs}, shot ${t.shotKb}KB)`);
+    } else if (e.timing && (e.type === "done" || e.type === "failed" || e.type === "cancelled")) {
+      const s = e.timing;
+      console.log(`[agent] run ${e.type}: ${s.steps} steps, ${s.totalMs}ms active, avg step ${s.avgStepMs}ms (model ${s.avgModelMs}, screenshot ${s.avgScreenshotMs}, action ${s.avgActionMs}, settle ${s.avgSettleMs}), nav total ${s.navMs}ms, slowest ${s.maxStepMs}ms`);
+    }
     if (e.type === "step") {
       log.push({ n: e.n, text: e.text, blocked: Boolean(e.blocked), at: e.at });
       if (log.length > 200) log.shift();

@@ -526,6 +526,54 @@ class BookingRun {
     this.acknowledged = new Set(); // takeover kinds the user already handled, per url
     this.nudges = 0;
     this.driving = false;
+    // Per-step timing: a step runs from one model request to the next, so
+    // time spent waiting on the user is never in it.
+    this.timings = [];
+    this.cur = null;
+  }
+
+  // ---- timing ------------------------------------------------------------
+
+  openStep() {
+    if (!this.cur) this.cur = { n: this.timings.length + 1, screenshotMs: 0, modelMs: 0, actionMs: 0, settleMs: 0, navMs: 0, shotKb: 0, startedAt: this.deps.now(), modelDone: false };
+    return this.cur;
+  }
+
+  closeStep() {
+    const c = this.cur;
+    if (!c) return;
+    this.cur = null;
+    const step = { n: c.n, screenshotMs: c.screenshotMs, modelMs: c.modelMs, actionMs: c.actionMs, settleMs: c.settleMs, navMs: c.navMs, shotKb: c.shotKb, totalMs: Math.max(0, this.deps.now() - c.startedAt) };
+    this.timings.push(step);
+    this.emit({ type: "timing", step, summary: this.timingSummary() });
+  }
+
+  async timed(kind, fn) {
+    const c = this.openStep();
+    const t0 = this.deps.now();
+    try {
+      return await fn();
+    } finally {
+      c[kind] += Math.max(0, this.deps.now() - t0);
+    }
+  }
+
+  /** Averages over the run so far (ms). */
+  timingSummary() {
+    const n = this.timings.length;
+    const sum = (k) => this.timings.reduce((a, s) => a + s[k], 0);
+    const avg = (k) => (n ? Math.round(sum(k) / n) : 0);
+    return {
+      steps: n,
+      totalMs: sum("totalMs"),
+      avgStepMs: avg("totalMs"),
+      avgModelMs: avg("modelMs"),
+      avgScreenshotMs: avg("screenshotMs"),
+      avgActionMs: avg("actionMs"),
+      avgSettleMs: avg("settleMs"),
+      navMs: sum("navMs"),
+      maxStepMs: n ? Math.max(...this.timings.map((s) => s.totalMs)) : 0,
+    };
   }
 
   emit(e) {
@@ -549,7 +597,7 @@ class BookingRun {
     const url = this.task.startUrl || searchUrlFor(this.task);
     this.status("Opening page");
     try {
-      await this.deps.navigate(url);
+      await this.timed("navMs", () => this.deps.navigate(url));
     } catch (e) {
       return this.fail(`Couldn't open the booking page: ${e && e.message ? e.message : e}`);
     }
@@ -622,10 +670,11 @@ class BookingRun {
 
   cancel(message = "Stopped. Nothing more will be clicked; the page is still open.") {
     if (["done", "failed", "cancelled"].includes(this.state)) return false;
+    this.closeStep();
     this.pauseClock();
     this.state = "cancelled";
     this.pending = null;
-    this.emit({ type: "cancelled", message, holdBlockId: this.task.holdBlockId });
+    this.emit({ type: "cancelled", message, holdBlockId: this.task.holdBlockId, timing: this.timingSummary() });
     return true;
   }
 
@@ -642,6 +691,7 @@ class BookingRun {
   }
 
   pause(state, payload) {
+    this.closeStep();
     this.pauseClock();
     this.state = state;
     this.pending = payload;
@@ -653,6 +703,7 @@ class BookingRun {
 
   fail(reason) {
     if (this.terminal()) return;
+    this.closeStep();
     this.pauseClock();
     this.state = "failed";
     this.pending = null;
@@ -662,7 +713,7 @@ class BookingRun {
     } catch {
       url = "";
     }
-    this.emit({ type: "failed", reason, url, lastStep: this.lastStep, holdBlockId: this.task.holdBlockId });
+    this.emit({ type: "failed", reason, url, lastStep: this.lastStep, holdBlockId: this.task.holdBlockId, timing: this.timingSummary() });
   }
 
   // ---- loop --------------------------------------------------------------
@@ -681,8 +732,9 @@ class BookingRun {
       return null;
     }
     try {
-      const shot = await this.deps.screenshot();
+      const shot = await this.timed("screenshotMs", () => this.deps.screenshot());
       this.screenshots += 1;
+      if (this.cur && shot && shot.dataUrl) this.cur.shotKb = Math.round(shot.dataUrl.length / 1024);
       this.lastShot = shot;
       return shot;
     } catch (e) {
@@ -761,9 +813,13 @@ class BookingRun {
     const body = this.body();
     this.input = [];
     this.steps += 1;
+    // A new request starts a new step (the previous one ends here).
+    if (this.cur && this.cur.modelDone) this.closeStep();
+    const step = this.openStep();
     let res;
     try {
-      res = await this.deps.callModel(body);
+      res = await this.timed("modelMs", () => this.deps.callModel(body));
+      step.modelDone = true;
     } catch (e) {
       this.fail(`The browser model call failed: ${e && e.message ? e.message : e}`);
       return null;
@@ -841,7 +897,7 @@ class BookingRun {
       if (result && result.stop) return;
     }
     if (this.state !== "running") return;
-    await this.deps.settle();
+    await this.timed("settleMs", () => this.deps.settle());
     if (await this.checkPage()) {
       this.pending.computerCallId = call.call_id;
       this.pending.acknowledged = call.acknowledged || [];
@@ -907,13 +963,16 @@ class BookingRun {
     this.lastStep = text;
     if (a.type !== "screenshot") this.emit({ type: "step", n: this.steps, text });
     const steps = toInputSteps(a, scale, this.viewport);
-    for (const s of steps) {
-      if (this.state !== "running") return { stop: true };
-      if (s.sleep) await this.deps.sleep(s.sleep);
-      else if (s.history) await this.deps.history(s.history);
-      else await this.deps.input(s);
-    }
-    return null;
+    const stopped = await this.timed("actionMs", async () => {
+      for (const s of steps) {
+        if (this.state !== "running") return true;
+        if (s.sleep) await this.deps.sleep(s.sleep);
+        else if (s.history) await this.deps.history(s.history);
+        else await this.deps.input(s);
+      }
+      return false;
+    });
+    return stopped ? { stop: true } : null;
   }
 
   /** Login walls, CAPTCHAs, card fields, 2FA: stop and hand over. */
@@ -976,7 +1035,7 @@ class BookingRun {
       case "request_final_confirmation": {
         const summary = str(args.summary, 400);
         const costs = args.costs_money === true || this.task.type === "tickets" || Boolean(str(args.amount));
-        await this.deps.settle();
+        await this.timed("settleMs", () => this.deps.settle());
         const shot = await this.shoot();
         if (!shot) return;
         if (costs) {
@@ -1001,6 +1060,7 @@ class BookingRun {
         if (!shot) return;
         const acted = this.finalClicked || this.userActed;
         const status = ev.ok && acted ? "booked" : "unclear";
+        this.closeStep();
         this.pauseClock();
         this.state = "done";
         this.emit({
@@ -1013,6 +1073,7 @@ class BookingRun {
           screenshot: shot.dataUrl,
           holdBlockId: this.task.holdBlockId,
           task: { type: this.task.type, venue: this.task.venue, date: this.task.date, time: this.task.time },
+          timing: this.timingSummary(),
         });
         return;
       }
@@ -1026,7 +1087,7 @@ class BookingRun {
         const url = str(args.url, 2000);
         if (!/^https?:\/\//i.test(url)) return out({ error: "http(s) URLs only." });
         try {
-          await this.deps.navigate(url);
+          await this.timed("navMs", () => this.deps.navigate(url));
           this.lastStep = `opened ${url.replace(/^https?:\/\//, "").slice(0, 60)}`;
           this.emit({ type: "step", n: this.steps, text: this.lastStep });
           out({ ok: true });

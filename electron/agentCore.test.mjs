@@ -524,3 +524,31 @@ describe("task + tools", () => {
     ]);
   });
 });
+
+describe("per-step timing", () => {
+  it("emits one timing per model step, excludes user wait time, and summarises on the end event", async () => {
+    const h = harness({
+      targets: { "400,300": PICK_7PM },
+      script: [cc(click(400, 300)), fc("ask_user", { question: "Indoor or outdoor?", field: "seating", optional: false }), fc("give_up", { reason: "done testing" })],
+    });
+    await h.run.start();
+    expect(h.run.state).toBe("waiting_answer");
+    // Step 1 (click) closed when step 2 began; step 2 closed on the pause.
+    const steps = h.ofType("timing").map((e) => e.step);
+    expect(steps.map((s) => s.n)).toEqual([1, 2]);
+    for (const s of steps) {
+      for (const k of ["screenshotMs", "modelMs", "actionMs", "settleMs", "navMs", "totalMs"]) expect(typeof s[k]).toBe("number");
+      expect(s.modelMs).toBeGreaterThan(0);
+    }
+    expect(steps[0].screenshotMs).toBeGreaterThan(0);
+    expect(steps[0].actionMs).toBeGreaterThan(0);
+    expect(steps[0].navMs).toBeGreaterThan(0); // the first page load belongs to step 1
+    h.run.answer("indoor");
+    await h.run.current;
+    const failed = h.ofType("failed")[0];
+    expect(failed.timing).toMatchObject({ steps: 3 });
+    expect(failed.timing.avgStepMs).toBeGreaterThan(0);
+    // No screenshot, URL or user text rides on timing events.
+    expect(JSON.stringify(h.ofType("timing"))).not.toMatch(/data:image|indoor|https?:/);
+  });
+});

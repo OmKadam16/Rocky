@@ -258,6 +258,12 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
             {timing.sendMs}ms total · planner {timing.plannerMs} (snap {timing.snapshotMs} + llm {timing.llmMs}/{timing.rounds}r + tools {timing.toolMs}){timing.spoken ? ` · tts ${timing.ttsMs}` : " · silent"}
           </div>
         )}
+        {debugOn && agent.timing.summary && (
+          <div className="mt-1 font-mono text-micro leading-[1.5] text-grey-faint">
+            agent {agent.timing.summary.steps} steps · avg {agent.timing.summary.avgStepMs}ms (model {agent.timing.summary.avgModelMs}, shot {agent.timing.summary.avgScreenshotMs}, act {agent.timing.summary.avgActionMs}, settle {agent.timing.summary.avgSettleMs}) · nav {agent.timing.summary.navMs} · max {agent.timing.summary.maxStepMs}
+            {agent.timing.last && ` · last ${agent.timing.last.totalMs}ms`}
+          </div>
+        )}
       </div>
     </aside>
   );
