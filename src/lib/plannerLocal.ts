@@ -5,6 +5,8 @@ import { PROVIDER_BASE_URL, normalizeProvider, resolveModelId } from "./models";
 import { getSecret } from "./secrets";
 import { SYSTEM_PROMPT } from "./plannerPrompt";
 import { MUTATING_TOOLS, contextSnapshot, runTool, toolSchemas } from "./plannerTools";
+import { BOOKING_TOOL_NAMES, agentWaitingContext } from "./bookingTools";
+import { isAgentActive } from "./agentClient";
 import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
 import type { AssistantTurn } from "../types";
 
@@ -175,6 +177,10 @@ export async function askPlannerLocal(
     // Urgency carries over one turn: "this is important" often arrives just
     // before the day/time ("change it to today"), so read both together.
     const urgent = detectUrgency(`${message} ${previousUserText}`);
+    // A paused booking agent: tell the planner what it is waiting on, so an
+    // answer goes to answer_agent_question instead of starting something new.
+    const waiting = agentWaitingContext();
+    if (waiting) messages.push({ role: "system", content: `agent_waiting: ${waiting}` });
     if (urgent) {
       messages.push({
         role: "system",
@@ -276,34 +282,24 @@ export async function askPlannerLocal(
           };
         }
 
-        // It said a booking is done, but no booking completed. A hold or a
-        // proposal is not a reservation — only book_appointment returning
-        // status "booked" earns booked-language. Give it one forced round to
-        // actually book, then refuse to pass the fabrication on.
-        const bookingTouched = toolsUsed.some(
-          (t) => t.name === "propose_booking" || t.name === "book_appointment",
-        );
-        const bookedOk = toolsUsed.some(
-          (t) =>
-            t.name === "book_appointment" &&
-            !(t.result as { error?: unknown } | null)?.error &&
-            (t.result as { status?: unknown } | null)?.status === "booked",
-        );
-        if (bookingTouched && !bookedOk && CLAIMS_BOOKED.test(reply)) {
+        // Only the agent announces a booking (agentClient.ts, with evidence
+        // from the confirmation page). No planner tool returns "booked", so any
+        // booked-language here, around a booking, is a fabrication.
+        const bookingTouched = isAgentActive() || toolsUsed.some((t) => (BOOKING_TOOL_NAMES as readonly string[]).includes(t.name));
+        if (bookingTouched && CLAIMS_BOOKED.test(reply)) {
           if (!nudgedBookingClaim) {
             nudgedBookingClaim = true;
-            forceTool = true;
             messages.push({
               role: "system",
               content:
-                "You just told the user a booking is done, but no tool returned status booked — a (booking…) hold or proposal is not a reservation. " +
-                "Either call book_appointment now (confirmed:true only if the user already said yes on an earlier turn), or reply plainly that it is NOT booked and say exactly what is still missing. " +
+                "You just told the user a booking is done or confirmed. You never announce bookings: a (booking…) hold or a started agent is not a reservation, and the agent reports its own result with the page's reference. " +
+                "Reply again without saying booked, confirmed or reserved: say what is actually happening (the agent is working, or what is still missing). " +
                 "Never present holds as completed bookings, never invent a confirmation reference, and never list two holds as two bookings.",
             });
             continue;
           }
           return {
-            reply: "I haven't actually completed that booking — the time is only held on your calendar. Tell me to go ahead and I'll book it properly.",
+            reply: "It isn't booked yet — the time is only held on your calendar. I'll say so the moment the booking page confirms it.",
             tools_used: toolsUsed,
             schedule_changed: changed,
             timing: stamp(),
@@ -330,7 +326,7 @@ export async function askPlannerLocal(
         let result: unknown;
         const tTool = Date.now();
         try {
-          result = await runTool(call.function.name, args, { openai, model, urgent });
+          result = await runTool(call.function.name, args, { openai, model, urgent, userText: message });
         } catch (error) {
           result = { error: error instanceof Error ? error.message : String(error) };
         }

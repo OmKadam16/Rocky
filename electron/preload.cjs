@@ -28,15 +28,21 @@ contextBridge.exposeInMainWorld("rocky", {
   shell: {
     openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   },
-  browser: {
-    /** False in a plain browser — the planner then hands over a link instead. */
-    available: () => ipcRenderer.invoke("browser:available"),
-    open: () => ipcRenderer.invoke("browser:open"),
-    navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
-    snapshot: () => ipcRenderer.invoke("browser:snapshot"),
-    click: (selector) => ipcRenderer.invoke("browser:click", selector),
-    type: (selector, text) => ipcRenderer.invoke("browser:type", selector, text),
-    close: () => ipcRenderer.invoke("browser:close"),
+  agent: {
+    /** Only defined on desktop: the planner hands over a link everywhere else. */
+    available: () => ipcRenderer.invoke("agent:available"),
+    start: (task) => ipcRenderer.invoke("agent:start", task),
+    answer: (text) => ipcRenderer.invoke("agent:answer", text),
+    confirm: (yes) => ipcRenderer.invoke("agent:confirm", yes === true),
+    continue: () => ipcRenderer.invoke("agent:continue"),
+    cancel: () => ipcRenderer.invoke("agent:cancel"),
+    state: () => ipcRenderer.invoke("agent:state"),
+    /** Subscribe to run events; returns an unsubscribe function. */
+    onEvent: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("agent:event", listener);
+      return () => ipcRenderer.removeListener("agent:event", listener);
+    },
   },
   ollama: {
     installOfficial: (platform) => ipcRenderer.invoke("ollama:installOfficial", platform),

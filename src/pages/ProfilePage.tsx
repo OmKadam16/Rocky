@@ -16,7 +16,7 @@ import {
   resolveModelId,
 } from "../lib/models";
 import { testElevenKey, testLlmKey } from "../lib/providerTest";
-import { BROWSER_MODEL } from "../lib/browserAgent";
+import { BROWSER_MODELS, browserModel, setBrowserModel, type BrowserModel } from "../lib/bookingTask";
 import { MEMORY_MODEL, checkOllama, hasMemoryModel } from "../lib/ollama";
 import { runVoiceSelfTest, type VoiceCheckStage } from "../lib/voiceCheck";
 import DevicesSection from "../components/DevicesSection";
@@ -79,6 +79,7 @@ export default function ProfilePage() {
   const [llmTesting, setLlmTesting] = useState(false);
   const [browserTest, setBrowserTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [browserTesting, setBrowserTesting] = useState(false);
+  const [agentModel, setAgentModel] = useState<BrowserModel>(() => browserModel());
   const [elTest, setElTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [elTesting, setElTesting] = useState(false);
   const [ollamaInfo, setOllamaInfo] = useState("");
@@ -292,11 +293,24 @@ export default function ProfilePage() {
                     </div>
                     <span className="font-mono text-[10.5px] text-grey-soft">{data?.profile.has_browser_key ? data.profile.browser_key_mask : "Not set"} — device only, never sent to Supabase</span>
                     <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-grey-mid">Booking agent model</span>
+                      {BROWSER_MODELS.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => { setBrowserModel(m); setAgentModel(m); setBrowserTest(null); }}
+                          className={`cursor-pointer rounded-[3px] border px-[10px] py-[5px] font-mono text-[10.5px] ${agentModel === m ? "border-ink text-ink" : "border-line-strong text-grey-mid hover:border-ink hover:text-ink"}`}
+                        >
+                          {m}{m === "gpt-5.4-mini" ? " · cheaper" : ""}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <button
                         onClick={async () => {
                           setBrowserTesting(true);
                           setBrowserTest(null);
-                          const r = await testLlmKey("OpenAI", BROWSER_MODEL, browserKey);
+                          const r = await testLlmKey("OpenAI", agentModel, browserKey);
                           setBrowserTesting(false);
                           setBrowserTest(r);
                         }}

@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import type { AssistantState, AssistantTurn } from "../types";
 import type { AssistantTiming } from "../hooks/useAssistant";
 import MicButton from "./MicButton";
+import AgentCard from "./AgentCard";
+import { useAgentView } from "../hooks/useAgentView";
 import { voiceInputSupported } from "../lib/speech";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -71,10 +73,12 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
     try { return localStorage.getItem("vc-debug") === "1"; } catch { return false; }
   });
   const voiceSupported = voiceInputSupported();
+  const agent = useAgentView();
+  const agentBusy = !["idle", "done", "failed", "cancelled"].includes(agent.phase);
   const canSend = draft.trim().length > 0 && state !== "thinking";
   const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant");
   const needsConfirm = Boolean(
-    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && state === "idle" && onSend,
+    lastAssistant && /say yes or tap confirm/i.test(lastAssistant.text) && state === "idle" && onSend && !agentBusy,
   );
 
   const submit = () => {
@@ -194,6 +198,7 @@ export default function AssistantPanel({ state, turns, caption, level = 0, error
             )}
           </div>
         )}
+        {onSend && <AgentCard agent={agent} onSend={(t) => onSend(t)} />}
         {error && (
           <div className="mb-[14px] rounded-[3px] border border-warm-line bg-warm-soft px-3 py-2 font-mono text-meta leading-[1.5] text-ink-soft">{error}</div>
         )}

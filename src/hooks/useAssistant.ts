@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantState, AssistantTurn } from "../types";
 import { askPlanner } from "../lib/planner";
 import { createBargeInAnalyser, ensureAudioUnlocked, speak, startRecognition, stopSpeaking } from "../lib/speech";
+import { cancelAgent, confirmAgent, continueAgent, getAgentView, isAgentActive, subscribeAgent } from "../lib/agentClient";
+import { isContinue, isExplicitNo, isExplicitYes, isStop } from "../lib/bookingTask";
 
 export const DEFAULT_SILENCE_MS = 1200;
 export const SILENCE_STORAGE_KEY = "vc-silence-ms";
@@ -50,7 +52,7 @@ const FILLER = /^(uh+|um+|hmm+|erm?|ah+|like|so|well|okay|ok|yeah|yep|right|mhm)
  * Confirm" is the whole booking/delete gate, and the filler rule below eats
  * single short words. The planner decides from history what "ok" means.
  */
-const CONFIRM_WORD = /^(yes|yeah|yep|yup|no|nope|sure|okay|ok|cancel|confirm|confirmed|stop|go ahead|do it)\s*[.!?]*$/i;
+const CONFIRM_WORD = /^(yes|yeah|yep|yup|no|nope|sure|okay|ok|cancel|confirm|confirmed|stop|go ahead|do it|continue|done)\s*[.!?]*$/i;
 
 function isFiller(text: string): boolean {
   const trimmed = text.trim();
@@ -59,6 +61,36 @@ function isFiller(text: string): boolean {
   if (FILLER.test(trimmed)) return true;
   // A single stray word is almost always a misfire, not a request.
   return trimmed.split(/\s+/).length < 2 && trimmed.length < 4;
+}
+
+/**
+ * Booking agent control words, handled in code before the planner sees them.
+ * The final-click yes must come from the user, never from the planner model,
+ * so a pending confirmation is answered here directly. Returns the reply to
+ * show/speak, or null to let the planner take the turn.
+ */
+export async function agentFastPath(text: string): Promise<string | null> {
+  const v = getAgentView();
+  if (v.phase === "confirm") {
+    if (isExplicitYes(text)) return (await confirmAgent(true)) ? "Booking it now." : "That confirmation already closed.";
+    if (isExplicitNo(text) || isStop(text)) {
+      await confirmAgent(false);
+      return null; // the agent announces the cancel itself
+    }
+    return "Say yes to book it, or no to stop.";
+  }
+  if (v.phase === "takeover") {
+    if (isContinue(text) || isExplicitYes(text)) return (await continueAgent()) ? "Carrying on." : null;
+    if (isStop(text) || isExplicitNo(text)) {
+      await cancelAgent();
+      return null;
+    }
+  }
+  if (isAgentActive() && isStop(text)) {
+    await cancelAgent();
+    return null;
+  }
+  return null;
 }
 
 export function useAssistant(onScheduleChange: () => void) {
@@ -92,6 +124,20 @@ export function useAssistant(onScheduleChange: () => void) {
       setError(null);
 
       try {
+        if (isAgentActive()) {
+          const v = getAgentView().phase;
+          const handled = await agentFastPath(text);
+          if (handled) {
+            push({ role: "assistant", text: handled });
+            if (speakReply) {
+              setState("speaking");
+              await speak(handled).catch(() => {});
+            }
+            return;
+          }
+          // Handled with no reply of our own: the agent's own announcement follows.
+          if (v === "confirm" || (v === "takeover" && (isStop(text) || isExplicitNo(text))) || isStop(text)) return;
+        }
         let response;
         try {
           response = await askPlanner(text, turnsRef.current.slice(0, -1));
@@ -242,6 +288,39 @@ export function useAssistant(onScheduleChange: () => void) {
     }, 450);
     return () => clearTimeout(t);
   }, [state, isConversation, listen]);
+
+  const announceQueue = useRef<string[]>([]);
+  const lastSeq = useRef(getAgentView().seq);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const flushAnnouncements = useCallback(async () => {
+    if (stateRef.current !== "idle") return;
+    const next = announceQueue.current.shift();
+    if (!next) return;
+    push({ role: "assistant", text: next });
+    setState("speaking");
+    try {
+      await speak(next);
+    } catch (e) {
+      if ((e as Error)?.name !== "AbortError") setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setState("idle");
+    }
+  }, [push]);
+  useEffect(
+    () =>
+      subscribeAgent((v) => {
+        if (v.seq === lastSeq.current) return;
+        lastSeq.current = v.seq;
+        if (v.announce) announceQueue.current.push(v.announce);
+        if (["done", "failed", "cancelled"].includes(v.phase)) onScheduleChange();
+        void flushAnnouncements();
+      }),
+    [flushAnnouncements, onScheduleChange],
+  );
+  useEffect(() => {
+    if (state === "idle" && announceQueue.current.length) void flushAnnouncements();
+  }, [state, flushAnnouncements]);
 
   const toggleConversation = useCallback(() => {
     if (isConversationRef.current) {

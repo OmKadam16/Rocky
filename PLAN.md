@@ -58,8 +58,9 @@ Rules:
 - Fixed commitments never move. Only flexible tasks/blocks get rescheduled.
 - API keys (`llm_key_enc`, `el_key_enc`, `browser_key_enc`) sync per user through the
   profile row's `extra` column (one key for all of a user's devices; RLS "own rows only"
-  scopes them). `llm_key` drives the planner, `browser_key` is reserved for the GPT-5.4
-  computer-use runner (the planner never reads it), `el_key` is ElevenLabs only.
+  scopes them). `llm_key` drives the planner, `browser_key` drives the Booking Agent
+  (read only by the Electron main process, sent only to api.openai.com; the planner never
+  reads it), `el_key` is ElevenLabs only.
   Claiming still needs the account's own session, so a leaked code alone grants nothing.
   Leak response: hidden 5-tap rotate panel in Profile → Devices (rotate code, wipe keys
   everywhere + revoke at the provider dashboards).
@@ -170,14 +171,21 @@ Planner stays on `llm_key` and never reads `browser_key`. No schema change, no m
       takeover, user data only into the matching field, "booked" needs confirmation text on the
       page, limits (40 steps, 6 active minutes, screenshots, repeated-action loop). Unit tests in
       `electron/agentCore.test.mjs`.
-- [ ] Agent window (fixed 1280x800 site view + "Rocky is driving" banner with Stop),
+- [x] Agent window (fixed 1280x800 site view + "Rocky is driving" banner with Stop),
       capturePage screenshots, sendInputEvent input, IPC start/answer/confirm/continue/cancel.
-- [ ] Fake multi-step booking site (`electron/test/fixtures`) + scripted-model Electron run.
-- [ ] Generic task types (restaurant / appointment / tickets) and slots; planner tools
+- [x] Fake multi-step booking site (`electron/test/fixtures`) + scripted-model Electron run
+      (`npm run test:agent-e2e`, 15 checks: real clicks/typing, ask/resume, injection refused,
+      final click blocked until yes, exactly one booking after it, reference read off the page).
+- [x] Generic task types (restaurant / appointment / tickets) and slots; planner tools
       find_place, propose_booking, book_appointment, answer_agent_question, continue_agent.
-- [ ] Laptop UI: question card, Confirm/Cancel/Stop, status, activity log; voice in/out.
+- [x] Laptop UI: question card, Confirm/Cancel/Stop, status, activity log; voice in/out.
+      Agent questions/results are spoken in code-built words; yes/no/stop/continue go straight to
+      the agent (the planner can never approve the final click). Model picker (gpt-5.4 / -mini)
+      in Profile → Model.
 - [ ] Phone relay through the existing `commands` table (short status/question text only).
-- [ ] Local booking records (Dexie, laptop only) + reference on the calendar block.
+- [x] Local booking records (separate local Dexie DB `RockyBookingRecords`, never synced) +
+      reference on the calendar block (title + notes); failed → "(booking failed - finish by hand)",
+      cancelled → hold removed.
 - [ ] Om: one real low-stakes free booking with the window visible.
 
 Docs check (OpenAI computer-use guide + API reference, 2026-10-10): the GA tool is
@@ -275,3 +283,4 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   fewer database round-trip); typed sends stay silent (text up, turn idle immediately)
   instead of waiting on speech synthesis — mic turns and yes/cancel still speak.
 - 2026-10-10: Booking Agent v2 started (Phase 8): main-process computer-use core with code-enforced safety gates and limits, 35 unit tests. Not wired to the app yet.
+- 2026-10-10: Booking Agent v2 wired in: agent window (banner + Stop, capturePage, sendInputEvent, isolated-world DOM probes for the gates), IPC start/answer/confirm/continue/cancel + events, generic planner tools (find_place, propose_booking, book_appointment, answer_agent_question, continue_agent), laptop agent card + spoken questions, local evidence records. Old selector agent (`browserAgent.ts`, `browserDriver.ts`) removed. `build:electron` now runs on Windows too (`scripts/build-electron.mjs`). 128 unit tests + 15-check Electron E2E.

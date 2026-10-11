@@ -8,12 +8,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "build:electron": "ELECTRON=1 tsc -b && ELECTRON=1 vite build",
+    "build:electron": "node scripts/build-electron.mjs",
     "electron:dev": "npm run build:electron && electron .",
     "build:mac": "npm run build:electron && electron-builder --mac",
     "install:app": "npm run build:mac && scripts/install-local.sh",
     "test": "vitest run",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test:agent-e2e": "electron electron/test/agentE2E.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

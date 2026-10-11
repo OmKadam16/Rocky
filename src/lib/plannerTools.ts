@@ -21,19 +21,7 @@ import {
   suggestMiddleSlot,
 } from "./scheduling";
 import type { FixedCommitmentRow, PreferencesRow, ScheduledBlockRow, TaskRow } from "../../shared/db";
-import {
-  buildBookingSearchUrl,
-  buildHoldTitle,
-  formatProposal,
-  liveModelCall,
-  missingBookingSlots,
-  nextBookingQuestion,
-  rememberArea,
-  rememberedArea,
-  runBookingLoop,
-  type BookingIntent,
-} from "./browserAgent";
-import { agentClick, agentClose, agentNavigate, agentOpen, agentSnapshot, agentType, isAgentAvailable } from "./browserDriver";
+import { BOOKING_TOOL_SCHEMAS, runBookingTool } from "./bookingTools";
 import {
   WEEKDAY_LONG,
   addDays,
@@ -60,7 +48,10 @@ export const MUTATING_TOOLS = new Set([
   "add_assignment_part",
   "set_task_status",
   "propose_booking",
+  // Agent handoffs count as acting, so the did-nothing guards leave them alone.
   "book_appointment",
+  "answer_agent_question",
+  "continue_agent",
 ]);
 
 const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
@@ -367,74 +358,7 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
       },
     },
   },
-  {
-    type: "function",
-    function: {
-      name: "find_restaurant",
-      description:
-        "Look up a restaurant or venue booking page for an area. Read-only: confirms venue + area and hands back a booking search link. If area is missing and none is remembered, it tells you to ask for the city — never guess it.",
-      parameters: {
-        type: "object",
-        properties: {
-          venue: { type: "string", description: "Restaurant or venue name" },
-          area: { type: "string", description: "City or neighbourhood" },
-        },
-        required: ["venue"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "propose_booking",
-      description:
-        "Propose a restaurant or appointment booking: checks the calendar (fixed commitments still win), holds the slot, and returns one summary line to read to the user. It never books — missing details come back as a single question to ask.",
-      parameters: {
-        type: "object",
-        properties: {
-          venue: { type: "string" },
-          area: { type: "string", description: "City or neighbourhood" },
-          date: { type: "string", description: "YYYY-MM-DD" },
-          start_time: { type: "string", description: "HH:MM" },
-          end_time: { type: "string", description: "HH:MM, defaults to 90 minutes after start" },
-          party_size: { type: "integer" },
-          first_name: { type: "string", description: "Contact first name for the booking page" },
-          last_name: { type: "string", description: "Contact last name for the booking page" },
-          phone: { type: "string", description: "Contact phone for the booking page" },
-          email: { type: "string", description: "Contact email for the booking page" },
-          occasion: { type: "string", description: "Occasion, or 'none'" },
-        },
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "book_appointment",
-      description:
-        "Book after an explicit yes. Without confirmed:true it only returns a confirmation preview — call it again with confirmed:true and the hold_block_id on a later turn. With confirmation it drives the booking page in the desktop agent window to completion (booked, blocked, or failed), or hands back a deep link when there is no agent window.",
-      parameters: {
-        type: "object",
-        properties: {
-          venue: { type: "string" },
-          area: { type: "string" },
-          date: { type: "string", description: "YYYY-MM-DD" },
-          start_time: { type: "string", description: "HH:MM" },
-          end_time: { type: "string", description: "HH:MM" },
-          party_size: { type: "integer" },
-          hold_block_id: { type: "string" },
-          confirmed: { type: "boolean" },
-          first_name: { type: "string" },
-          last_name: { type: "string" },
-          phone: { type: "string" },
-          email: { type: "string" },
-          occasion: { type: "string" },
-        },
-        required: [],
-      },
-    },
-  },
+  ...BOOKING_TOOL_SCHEMAS,
 ];
 
 /**
@@ -461,7 +385,7 @@ export const toolSchemas: ChatCompletionTool[] = ALL_TOOL_SCHEMAS.filter(
 type Args = Record<string, any>;
 
 /** The model client, so note summarisation can reuse the user's key. Urgent turns displace rather than defer. */
-export type ToolContext = { openai: OpenAI; model: string; urgent?: boolean };
+export type ToolContext = { openai: OpenAI; model: string; urgent?: boolean; /** The user's own words this turn: booking gates check these, not the model's. */ userText?: string };
 
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -1350,185 +1274,22 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       return { updated: true, task: { id: task.id, name: task.name, status } };
     }
 
-    case "find_restaurant": {
-      const venue = String(args.venue ?? "").trim();
-      if (!venue) return { error: "venue is required — ask which place to book." };
-      let area = String(args.area ?? "").trim();
-      if (!area) {
-        const remembered = await rememberedArea();
-        if (remembered) area = remembered;
-        else return { needs: ["area"], question: "Which city or neighbourhood?" };
-      }
-      return {
-        venue,
-        area,
-        search_url: buildBookingSearchUrl({ venue, area }),
-        hint: "Confirm the venue exists in that area before proposing. Never invent an address.",
-      };
-    }
-
-    case "propose_booking": {
-      const size = Number(args.party_size);
-      const intent: BookingIntent = {
-        venue: String(args.venue ?? "").trim() || null,
-        area: String(args.area ?? "").trim() || null,
-        date: String(args.date ?? "").trim() || null,
-        startTime: String(args.start_time ?? "").trim() || null,
-        endTime: String(args.end_time ?? "").trim() || null,
-        partySize: Number.isFinite(size) && size > 0 ? Math.floor(size) : null,
-        firstName: String(args.first_name ?? "").trim() || null,
-        lastName: String(args.last_name ?? "").trim() || null,
-        phone: String(args.phone ?? "").trim() || null,
-        email: String(args.email ?? "").trim() || null,
-        occasion: String(args.occasion ?? "").trim() || null,
-      };
-      if (!intent.area) intent.area = await rememberedArea();
-      // The account email is usually the answer — offer it, don't ask cold.
-      let suggestedEmail: string | null = null;
-      if (!intent.email) {
-        try {
-          const p = (await db.profiles.get("local")) as unknown as { email?: string | null } | undefined;
-          suggestedEmail = p?.email?.trim() || null;
-        } catch {
-          suggestedEmail = null;
-        }
-      }
-      const missing = missingBookingSlots(intent);
-      if (missing.length > 0) {
-        const question = nextBookingQuestion(intent, suggestedEmail);
-        return { needs: missing, question, ...(suggestedEmail && missing[0] === "email" ? { suggested_email: suggestedEmail } : {}) };
-      }
-      const date = intent.date as string;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parseISODate(date).getTime())) {
-        return { error: "date must be a real YYYY-MM-DD date." };
-      }
-      const start = intent.startTime as string;
-      if (!/^\d{1,2}:\d{2}$/.test(start)) return { error: "start_time must be HH:MM." };
-      const end = intent.endTime && /^\d{1,2}:\d{2}$/.test(intent.endTime)
-        ? intent.endTime
-        : fromMinutes(minutesOf(start) + 90);
-      const past = pastDateError(date, "date");
-      if (past) return past;
-      // A booking is an ordinary event: fixed commitments still always win.
-      const fixedClash = await fixedOverlapError(date, start, end);
-      if (fixedClash) return fixedClash;
-      // A re-proposal moves the existing hold instead of stacking a second one:
-      // without this, confirming 6pm then switching to 7:30 leaves two holds and
-      // the new proposal bounces off the old one as an "overlap".
-      const dayBlocks = await loadBlocks(date, date);
-      const ownHold = intent.venue
-        ? dayBlocks.find((b) => b.title.includes("(booking…)") && matchesQuery(b.title, intent.venue as string))
-        : undefined;
-      const eventClash = await eventOverlapError(date, start, end, ownHold?.id);
-      if (eventClash) return eventClash;
-      if (intent.area) await rememberArea(intent.area);
-      const full = { ...intent, endTime: end };
-      let hold: { id: string };
-      if (ownHold) {
-        await db.scheduled_blocks.update(ownHold.id, {
-          title: buildHoldTitle(full),
-          start_time: start,
-          end_time: end,
-        } as any);
-        hold = { id: ownHold.id };
-      } else {
-        hold = await insertBlock({
-          source_type: "event",
-          source_id: null,
-          title: buildHoldTitle(full),
-          date,
-          start_time: start,
-          end_time: end,
-        });
-      }
-      return {
-        proposed: true,
-        summary: formatProposal(full),
-        hold_block_id: hold.id,
-        search_url: buildBookingSearchUrl(full),
-        next: "Read the summary to the user verbatim, then wait for yes or no. Only call book_appointment after an explicit yes, passing confirmed: true and this hold_block_id.",
-      };
-    }
-
-    case "book_appointment": {
-      // Safety — booking out in the world needs an explicit yes, with one fast path,
-      // exactly like deletes. No confirmed flag, no booking. Ever.
-      if (args.confirmed !== true) {
-        const venue = String(args.venue ?? "").trim() || "that place";
-        return {
-          needs_confirmation: true,
-          preview: `Book ${venue}? Say yes or tap Confirm — nothing books without it.`,
-        };
-      }
-      const venue = String(args.venue ?? "").trim();
-      const area = String(args.area ?? "").trim() || (await rememberedArea()) || "";
-      const searchUrl = buildBookingSearchUrl({ venue: venue || null, area: area || null });
-      const available = await isAgentAvailable().catch(() => false);
-      // No agent window (plain browser): hand the booking page over instead.
-      if (!available) {
-        return {
-          status: "needs_browser",
-          hold_block_id: args.hold_block_id ?? null,
-          deep_link: searchUrl,
-          instruction:
-            "No desktop agent window here. Give the user the link and the slot; they finish the booking by hand and the hold stays on their calendar.",
-        };
-      }
-      // Desktop: drive the booking page in the visible agent window to
-      // completion (capped: 10 steps, 2 minutes). The user watches every step;
-      // the window stays open on every terminal state as proof or for takeover.
-      const callModel = await liveModelCall().catch(() => null);
-      if (!callModel) {
-        return {
-          status: "failed",
-          hold_block_id: args.hold_block_id ?? null,
-          deep_link: searchUrl,
-          reason: "Add your browser key in Profile → Model first, then say yes again.",
-        };
-      }
-      const size = Number(args.party_size);
-      const intent: BookingIntent = {
-        venue: venue || null,
-        area: area || null,
-        date: String(args.date ?? "").trim() || null,
-        startTime: String(args.start_time ?? "").trim() || null,
-        endTime: String(args.end_time ?? "").trim() || null,
-        partySize: Number.isFinite(size) && size > 0 ? Math.floor(size) : null,
-        firstName: String(args.first_name ?? "").trim() || null,
-        lastName: String(args.last_name ?? "").trim() || null,
-        phone: String(args.phone ?? "").trim() || null,
-        email: String(args.email ?? "").trim() || null,
-        occasion: String(args.occasion ?? "").trim() || null,
-      };
-      const result = await runBookingLoop({
-        driver: {
-          open: agentOpen,
-          navigate: agentNavigate,
-          snapshot: agentSnapshot,
-          click: agentClick,
-          type: agentType,
-          close: agentClose,
+    case "find_place":
+    case "propose_booking":
+    case "book_appointment":
+    case "answer_agent_question":
+    case "continue_agent":
+      return runBookingTool(name, args, { userText: ctx?.userText }, {
+        loadBlocks,
+        insertBlock: (row) => insertBlock(row),
+        updateBlock: async (id, patch) => {
+          await db.scheduled_blocks.update(id, patch as any);
         },
-        model: callModel,
-        intent,
-        startUrl: searchUrl,
-        holdBlockId: typeof args.hold_block_id === "string" ? args.hold_block_id : null,
-        holds: {
-          annotate: async (id: string, title: string) => {
-            await db.scheduled_blocks.update(id, { title } as any);
-          },
-        },
+        fixedOverlapError,
+        eventOverlapError,
+        pastDateError,
+        addMinutes: (time, minutes) => fromMinutes(minutesOf(time) + minutes),
       });
-      return {
-        ...result,
-        speak:
-          result.status === "booked"
-            ? "Read the summary as the receipt, one short line."
-            : result.status === "needs_user"
-              ? "Relay the question verbatim — the booking page is open in front of the user."
-              : "Say it didn't go through, give the deep link, and confirm the failed hold is still on their calendar.",
-      };
-    }
 
     default:
       throw new Error(`Unknown tool: ${name}`);
