@@ -9,6 +9,7 @@ import { clearChat as clearStoredChat, loadChat, saveTurn } from "../lib/chatHis
 import { commitmentCardFromTools, pendingProposalId } from "../lib/chatCards";
 import { cancelProposal, commitmentReply, confirmProposal, receiptText } from "../lib/commitmentProposals";
 import { beginCapture, endCapture, registerUndo, runUndo } from "../lib/undoJournal";
+import { isMemoryQuestion, memoryCardFor, takeMemoryCard } from "../lib/memoryIntent";
 
 export const DEFAULT_SILENCE_MS = 1200;
 export const SILENCE_STORAGE_KEY = "vc-silence-ms";
@@ -241,7 +242,9 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
       const tSend = Date.now();
       // While the site's code is pending, the code never lands in the chat
       // (or the planner's history, which is built from these turns).
-      push({ role: "user", text: getAgentView().phase === "code" ? CODE_PLACEHOLDER : text });
+      // Memory questions are decided in code and never reach the cloud planner.
+      const memoryQ = !isAgentActive() && isMemoryQuestion(text);
+      const userTurn = push({ role: "user", text: getAgentView().phase === "code" ? CODE_PLACEHOLDER : text, ...(memoryQ ? { private: true } : {}) });
       setCaption("");
       setState("thinking");
       setError(null);
@@ -255,6 +258,16 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
               setState("speaking");
               await speak(routed.reply).catch(() => {});
             }
+          }
+          return;
+        }
+        if (memoryQ) {
+          const card = await memoryCardFor(text);
+          push({ role: "assistant", text: "", private: true, card });
+          // Spoken: the short answer only, never the source list.
+          if (speakReply) {
+            setState("speaking");
+            await speak(card.answer).catch(() => {});
           }
           return;
         }
@@ -287,6 +300,20 @@ export function useAssistant(onScheduleChange: () => void, options: AssistantOpt
         }
         // Planner succeeded — the text reply stays visible even if voice fails.
         const card = commitmentCardFromTools(response.tools_used);
+        const memoryCard = takeMemoryCard();
+        if (memoryCard) {
+          // The planner routed it to Memory: show the local answer, privately,
+          // and keep the question out of the planner's history from now on.
+          turnsRef.current = turnsRef.current.map((t) => (t.id === userTurn.id ? { ...t, private: true } : t));
+          if (persist) void saveTurn({ ...userTurn, private: true });
+          push({ role: "assistant", text: "", private: true, card: memoryCard });
+          await endCapture();
+          if (speakReply) {
+            setState("speaking");
+            await speak(memoryCard.answer).catch(() => {});
+          }
+          return;
+        }
         push({ role: "assistant", text: response.reply, ...(card ? { card } : {}) });
         const receipt = await endCapture();
         if (receipt) push({ role: "assistant", text: "", private: true, card: { kind: "receipt", text: receipt.text, undoId: receipt.undoId } });

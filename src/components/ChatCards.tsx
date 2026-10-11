@@ -3,6 +3,7 @@ import type { useAssistant } from "../hooks/useAssistant";
 import type { ChatCard, CommitmentFields } from "../types";
 import { DAY_SHORT, editProposal, getProposal, subscribeProposals, summarize } from "../lib/commitmentProposals";
 import { canUndo, subscribeUndo } from "../lib/undoJournal";
+import MemoryResultCard from "./MemoryResultCard";
 
 type Assistant = ReturnType<typeof useAssistant>;
 type Props = { card: ChatCard; assistant: Assistant };
@@ -20,6 +21,8 @@ export default function ChatCardView({ card, assistant }: Props) {
       return <CommitmentCard card={card} assistant={assistant} />;
     case "receipt":
       return <ReceiptCard card={card} assistant={assistant} />;
+    case "memory":
+      return <MemoryResultCard status={card.status} answer={card.answer} sources={card.sources} />;
     default:
       return null;
   }

@@ -24,6 +24,7 @@ import type { FixedCommitmentRow, PreferencesRow, ScheduledBlockRow, TaskRow } f
 import { BOOKING_TOOL_SCHEMAS, runBookingTool } from "./bookingTools";
 import { COMMITMENT_TOOL_SCHEMAS, runCommitmentTool } from "./commitmentTools";
 import { snapshotIfCapturing } from "./undoJournal";
+import { ASK_MEMORY_SCHEMA, runAskMemory } from "./memoryIntent";
 import {
   WEEKDAY_LONG,
   addDays,
@@ -362,6 +363,7 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
   },
   ...BOOKING_TOOL_SCHEMAS,
   ...COMMITMENT_TOOL_SCHEMAS,
+  ASK_MEMORY_SCHEMA,
 ];
 
 /**
@@ -1281,6 +1283,10 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       await db.tasks.update(task.id, { status } as any);
       return { updated: true, task: { id: task.id, name: task.name, status } };
     }
+
+    case "ask_memory":
+      // The planner gets a fixed line; the answer goes only to the chat.
+      return runAskMemory(args, ctx?.userText);
 
     case "propose_commitment":
     case "propose_commitment_change":

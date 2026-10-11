@@ -102,8 +102,9 @@ async function answerQuestion(question, deps) {
           {
             role: "system",
             content:
-              "You answer questions about web pages the user visited, using ONLY the numbered snippets. One or two short sentences, plain text, no lists. " +
-              "Name the page it came from. If the snippets don't answer the question, reply exactly: I couldn't find that.",
+              "You answer questions about web pages the user visited, using ONLY the numbered snippets. " +
+              "In one or two short plain sentences, say what the page said that answers the question, and name the page by its title. No lists. " +
+              "If the snippets don't answer the question, reply exactly: I couldn't find that.",
           },
           { role: "user", content: `Snippets:\n${snippets}\n\nQuestion: ${question}` },
         ],
