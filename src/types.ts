@@ -72,7 +72,7 @@ export type AssistantTurn = {
 
 export type ViewName = "day" | "week" | "month" | "search";
 
-export type PageName = "calendar" | "fixed" | "assignments" | "dashboard" | "profile" | "memory" | "tasks";
+export type PageName = "calendar" | "fixed" | "dashboard" | "profile" | "memory";
 
 export type Assignment = {
   id: string;

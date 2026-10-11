@@ -8,16 +8,12 @@ import Onboarding from "./components/Onboarding";
 import SearchView from "./components/SearchView";
 import Sidebar from "./components/Sidebar";
 import WeekView from "./components/WeekView";
-import AssignmentsPage from "./pages/AssignmentsPage";
 import ChatPanel from "./components/ChatPanel";
 import ChatCardView from "./components/ChatCards";
 import DashboardDayPanel from "./components/DashboardDayPanel";
 import FixedCommitmentsPage from "./pages/FixedCommitmentsPage";
 import MemoryPage from "./pages/MemoryPage";
 import ProfilePage from "./pages/ProfilePage";
-import TasksPage from "./pages/TasksPage";
-import { useAssignments } from "./hooks/useAssignments";
-import { ASSIGNMENTS_ENABLED } from "./lib/features";
 import { useAssistant } from "./hooks/useAssistant";
 import { useAuth } from "./hooks/useAuth";
 import { useFixedCommitments } from "./hooks/useFixedCommitments";
@@ -78,12 +74,8 @@ export default function App() {
     setCalendarOffset(0);
     const scroller = document.getElementById("main-scroll");
     if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" });
-    const scroller2 = document.getElementById("main-scroll-assignments");
-    if (scroller2) scroller2.scrollTop = 0;
     const scroller3 = document.getElementById("main-scroll-memory");
     if (scroller3) scroller3.scrollTop = 0;
-    const scroller4 = document.getElementById("main-scroll-tasks");
-    if (scroller4) scroller4.scrollTop = 0;
   }, [view, page]);
 
   const calendarDate = (() => {
@@ -110,7 +102,6 @@ export default function App() {
     refresh: refreshCommitments,
     error: fixedError,
   } = useFixedCommitments();
-  const { assignments, add: addAssignment, update: updateAssignment, remove: removeAssignment, refresh: refreshAssignments, setStatus: setTaskStatus } = useAssignments() as any;
 
   const { day, week, now, loading, error, refresh } = useSchedule(calendarDate);
   // Laptop presence heartbeat (every 15 s while open) for the phone's online chip.
@@ -148,7 +139,6 @@ export default function App() {
   const assistant = useAssistant(
     () => {
       void refresh();
-      void refreshAssignments();
       void refreshCommitments();
       setCalendarTick((t) => t + 1);
     },
@@ -171,7 +161,6 @@ export default function App() {
       <Sidebar
         page={page}
         onNavigate={(next) => {
-          if (next === "assignments" && !ASSIGNMENTS_ENABLED) return;
           setPage(next);
         }}
         open={navOpen}
@@ -211,71 +200,6 @@ export default function App() {
             }
           }}
         />
-      ) : page === "assignments" && ASSIGNMENTS_ENABLED ? (
-        <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll-assignments" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
-            <AssignmentsPage
-              assignments={assignments}
-              onAdd={async (a) => {
-                try {
-                  await addAssignment(a as unknown as never);
-                  await refresh();
-                  await refreshAssignments();
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-              onUpdate={async (a) => {
-                try {
-                  await updateAssignment(a);
-                  await refresh();
-                  await refreshAssignments();
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-              onRemove={async (id) => {
-                try {
-                  await removeAssignment(id);
-                  await refresh();
-                  await refreshAssignments();
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-            />
-          </main>
-          <AssistantPanel
-            collapsed={!assistantOpen}
-            onCollapse={() => setAssistantOpen((v) => !v)}
-            state={assistant.state}
-            turns={assistant.turns}
-            caption={assistant.caption}
-            level={assistant.level}
-            error={assistant.error} timing={assistant.lastTiming}
-            onToggle={assistant.toggle}
-            onSend={assistant.send}
-          />
-        </div>
-      ) : page === "tasks" ? (
-        <div className="flex min-w-0 flex-1 overflow-hidden">
-          <main id="main-scroll-tasks" className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
-            <TasksPage
-              assignments={assignments}
-              onAdd={async (a) => {
-                try { await addAssignment(a as unknown as never); await refresh(); await refreshAssignments(); } catch (e) { console.error(e); }
-              }}
-              onUpdate={async (a) => {
-                try { await updateAssignment(a); await refresh(); await refreshAssignments(); } catch (e) { console.error(e); }
-              }}
-              onRemove={async (id) => {
-                try { await removeAssignment(id); await refresh(); await refreshAssignments(); } catch (e) { console.error(e); }
-              }}
-              onSetStatus={async (id, status) => { await setTaskStatus(id, status); await refreshAssignments(); await refresh(); }}
-            />
-          </main>
-          <AssistantPanel collapsed={!assistantOpen} onCollapse={() => setAssistantOpen((v) => !v)} state={assistant.state} turns={assistant.turns} caption={assistant.caption} level={assistant.level} error={assistant.error} timing={assistant.lastTiming} onToggle={assistant.toggle} onSend={assistant.send} />
-        </div>
       ) : page === "dashboard" ? (
         // Universal chat (center) + the selected day (right). The chat replaces
         // the side AssistantPanel here; other pages keep it.

@@ -1,6 +1,5 @@
-import { ASSIGNMENTS_ENABLED } from "../lib/features";
 import type { PageName } from "../types";
-import { AssignmentsIcon, CalendarIcon, DashboardIcon, MemoryIcon, FixedIcon, ProfileIcon } from "./NavIcons";
+import { CalendarIcon, DashboardIcon, MemoryIcon, FixedIcon, ProfileIcon } from "./NavIcons";
 import ThemeToggle from "./ThemeToggle";
 
 type Props = {
@@ -22,8 +21,6 @@ export default function Sidebar({ page, onNavigate, open, onToggle, fixedCount, 
     { id: "calendar" as const, label: "Calendar", icon: CalendarIcon, soon: false },
     { id: "fixed" as const, label: "Fixed", icon: FixedIcon, soon: false },
     { id: "memory" as const, label: "Memory", icon: MemoryIcon, soon: false },
-    { id: "tasks" as const, label: "Tasks", icon: AssignmentsIcon, soon: false },
-    { id: "assignments" as const, label: "Assignments", icon: AssignmentsIcon, soon: !ASSIGNMENTS_ENABLED },
     { id: "profile" as const, label: "Profile", icon: ProfileIcon, soon: false },
   ];
 

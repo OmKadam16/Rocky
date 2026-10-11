@@ -1,10 +1,9 @@
 /**
  * Features that ship with student mode rather than the everyone build.
  *
- * Flip ASSIGNMENTS_ENABLED to true to restore the Assignments page, its nav
- * item, the dashboard sections and the assistant's assignment tools. Nothing
- * is deleted while it is false — the page, the hook, the tool handlers and
- * every stored row stay exactly where they are.
+ * ASSIGNMENTS_ENABLED gates the assistant's assignment tools only. The
+ * Assignments/Tasks pages, their nav items, the hook and the form/popup
+ * components were removed (2026-10-12); stored task rows are untouched.
  */
 export const ASSIGNMENTS_ENABLED = false;
 
