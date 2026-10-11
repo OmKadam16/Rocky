@@ -24,9 +24,17 @@ const nextId = () => `turn-${(turnId += 1)}`;
  */
 const FILLER = /^(uh+|um+|hmm+|erm?|ah+|like|so|well|okay|ok|yeah|yep|right|mhm)[\s.,!?]*$/i;
 
+/**
+ * Confirmations must always reach the planner — "yes" after "say yes or tap
+ * Confirm" is the whole booking/delete gate, and the filler rule below eats
+ * single short words. The planner decides from history what "ok" means.
+ */
+const CONFIRM_WORD = /^(yes|yeah|yep|yup|no|nope|sure|okay|ok|cancel|confirm|confirmed|stop|go ahead|do it)\s*[.!?]*$/i;
+
 function isFiller(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
+  if (CONFIRM_WORD.test(trimmed)) return false;
   if (FILLER.test(trimmed)) return true;
   // A single stray word is almost always a misfire, not a request.
   return trimmed.split(/\s+/).length < 2 && trimmed.length < 4;

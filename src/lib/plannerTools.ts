@@ -398,6 +398,11 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
           start_time: { type: "string", description: "HH:MM" },
           end_time: { type: "string", description: "HH:MM, defaults to 90 minutes after start" },
           party_size: { type: "integer" },
+          first_name: { type: "string", description: "Contact first name for the booking page" },
+          last_name: { type: "string", description: "Contact last name for the booking page" },
+          phone: { type: "string", description: "Contact phone for the booking page" },
+          email: { type: "string", description: "Contact email for the booking page" },
+          occasion: { type: "string", description: "Occasion, or 'none'" },
         },
         required: [],
       },
@@ -420,6 +425,11 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
           party_size: { type: "integer" },
           hold_block_id: { type: "string" },
           confirmed: { type: "boolean" },
+          first_name: { type: "string" },
+          last_name: { type: "string" },
+          phone: { type: "string" },
+          email: { type: "string" },
+          occasion: { type: "string" },
         },
         required: [],
       },
@@ -1352,7 +1362,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       return {
         venue,
         area,
-        search_url: buildBookingSearchUrl({ venue, area, date: null, startTime: null, endTime: null, partySize: null }),
+        search_url: buildBookingSearchUrl({ venue, area }),
         hint: "Confirm the venue exists in that area before proposing. Never invent an address.",
       };
     }
@@ -1366,10 +1376,28 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         startTime: String(args.start_time ?? "").trim() || null,
         endTime: String(args.end_time ?? "").trim() || null,
         partySize: Number.isFinite(size) && size > 0 ? Math.floor(size) : null,
+        firstName: String(args.first_name ?? "").trim() || null,
+        lastName: String(args.last_name ?? "").trim() || null,
+        phone: String(args.phone ?? "").trim() || null,
+        email: String(args.email ?? "").trim() || null,
+        occasion: String(args.occasion ?? "").trim() || null,
       };
       if (!intent.area) intent.area = await rememberedArea();
+      // The account email is usually the answer — offer it, don't ask cold.
+      let suggestedEmail: string | null = null;
+      if (!intent.email) {
+        try {
+          const p = (await db.profiles.get("local")) as unknown as { email?: string | null } | undefined;
+          suggestedEmail = p?.email?.trim() || null;
+        } catch {
+          suggestedEmail = null;
+        }
+      }
       const missing = missingBookingSlots(intent);
-      if (missing.length > 0) return { needs: missing, question: nextBookingQuestion(intent) };
+      if (missing.length > 0) {
+        const question = nextBookingQuestion(intent, suggestedEmail);
+        return { needs: missing, question, ...(suggestedEmail && missing[0] === "email" ? { suggested_email: suggestedEmail } : {}) };
+      }
       const date = intent.date as string;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parseISODate(date).getTime())) {
         return { error: "date must be a real YYYY-MM-DD date." };
@@ -1384,18 +1412,35 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       // A booking is an ordinary event: fixed commitments still always win.
       const fixedClash = await fixedOverlapError(date, start, end);
       if (fixedClash) return fixedClash;
-      const eventClash = await eventOverlapError(date, start, end);
+      // A re-proposal moves the existing hold instead of stacking a second one:
+      // without this, confirming 6pm then switching to 7:30 leaves two holds and
+      // the new proposal bounces off the old one as an "overlap".
+      const dayBlocks = await loadBlocks(date, date);
+      const ownHold = intent.venue
+        ? dayBlocks.find((b) => b.title.includes("(booking…)") && matchesQuery(b.title, intent.venue as string))
+        : undefined;
+      const eventClash = await eventOverlapError(date, start, end, ownHold?.id);
       if (eventClash) return eventClash;
       if (intent.area) await rememberArea(intent.area);
       const full = { ...intent, endTime: end };
-      const hold = await insertBlock({
-        source_type: "event",
-        source_id: null,
-        title: buildHoldTitle(full),
-        date,
-        start_time: start,
-        end_time: end,
-      });
+      let hold: { id: string };
+      if (ownHold) {
+        await db.scheduled_blocks.update(ownHold.id, {
+          title: buildHoldTitle(full),
+          start_time: start,
+          end_time: end,
+        } as any);
+        hold = { id: ownHold.id };
+      } else {
+        hold = await insertBlock({
+          source_type: "event",
+          source_id: null,
+          title: buildHoldTitle(full),
+          date,
+          start_time: start,
+          end_time: end,
+        });
+      }
       return {
         proposed: true,
         summary: formatProposal(full),
@@ -1417,14 +1462,7 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       }
       const venue = String(args.venue ?? "").trim();
       const area = String(args.area ?? "").trim() || (await rememberedArea()) || "";
-      const searchUrl = buildBookingSearchUrl({
-        venue: venue || null,
-        area: area || null,
-        date: null,
-        startTime: null,
-        endTime: null,
-        partySize: null,
-      });
+      const searchUrl = buildBookingSearchUrl({ venue: venue || null, area: area || null });
       const available = await isAgentAvailable().catch(() => false);
       // No agent window (plain browser): hand the booking page over instead.
       if (!available) {
@@ -1456,6 +1494,11 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
         startTime: String(args.start_time ?? "").trim() || null,
         endTime: String(args.end_time ?? "").trim() || null,
         partySize: Number.isFinite(size) && size > 0 ? Math.floor(size) : null,
+        firstName: String(args.first_name ?? "").trim() || null,
+        lastName: String(args.last_name ?? "").trim() || null,
+        phone: String(args.phone ?? "").trim() || null,
+        email: String(args.email ?? "").trim() || null,
+        occasion: String(args.occasion ?? "").trim() || null,
       };
       const result = await runBookingLoop({
         driver: {

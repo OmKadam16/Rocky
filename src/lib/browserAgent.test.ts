@@ -22,17 +22,33 @@ const FULL: BookingIntent = {
   startTime: "19:30",
   endTime: "21:00",
   partySize: 2,
+  firstName: "Om",
+  lastName: "Kadam",
+  phone: "555-0100",
+  email: "om@example.com",
+  occasion: "none",
 };
 
 describe("booking slot-filling", () => {
-  it("asks slots in order: venue, area, date, time, party", () => {
+  it("asks slots in order: venue, area, date, time, party, contact, occasion", () => {
     expect(nextBookingQuestion({ ...FULL, venue: null })).toBe("Which place should I book?");
     expect(nextBookingQuestion({ ...FULL, area: null })).toBe("Which city or neighbourhood?");
     expect(nextBookingQuestion({ ...FULL, date: null })).toBe("Which day?");
     expect(nextBookingQuestion({ ...FULL, startTime: null })).toBe("What time?");
     expect(nextBookingQuestion({ ...FULL, partySize: null })).toBe("How many people?");
+    expect(nextBookingQuestion({ ...FULL, firstName: null })).toBe("What first name should the booking go under?");
+    expect(nextBookingQuestion({ ...FULL, lastName: null })).toBe("And the last name?");
+    expect(nextBookingQuestion({ ...FULL, phone: null })).toBe("What phone number should I put down?");
+    expect(nextBookingQuestion({ ...FULL, email: null })).toBe("What email should I put down?");
+    expect(nextBookingQuestion({ ...FULL, occasion: null })).toBe("Is this for an occasion? (or say none)");
     expect(nextBookingQuestion(FULL)).toBeNull();
     expect(isBookingComplete(FULL)).toBe(true);
+  });
+
+  it("offers the account email instead of asking cold", () => {
+    expect(nextBookingQuestion({ ...FULL, email: null }, "om@example.com")).toBe(
+      "Should I use om@example.com for the booking email, or a different one?",
+    );
   });
 
   it("treats blank strings and zero party as missing", () => {

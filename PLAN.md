@@ -232,3 +232,10 @@ All must pass. Then click through the changed screens in `npm run dev` (http://l
   annotate the hold (`(booked)` / `(booking failed — finish by hand)`), window stays open
   as proof or for takeover; login walls and garbage output hand to the user, never act.
   `book_appointment` (confirmed) runs it and returns booked / needs_user / failed.
+- 2026-10-10: Booking honesty fixes from a real transcript: booked-language now requires a
+  tool returning status booked (fabricated "Done" gets bounced, then refused plainly);
+  voice "yes/no/ok" always reaches the planner (filler exemption); re-proposing moves the
+  existing hold instead of stacking a second one and bouncing off it; contact slots added
+  (first/last name, phone, email with account-email suggestion, occasion); prompt rules for
+  time windows (slot-finder, never pin to window start), holds-are-not-bookings, and
+  spoken/on-screen receipts only (no email sending).

@@ -50,6 +50,15 @@ const PROMISES_A_CHANGE =
 const CLAIMS_A_CHANGE =
   /\b(?:done|booked|added|scheduled|rescheduled|moved|shifted|created|deleted|removed|cancell?ed|slotted|locked in|all set|sorted|you'?re on for|put (?:it|that|you|lunch|dinner|them))\b|\bon (?:your|the) calendar\b/i;
 
+/**
+ * Claiming an external booking is done. A calendar hold (propose_booking) is
+ * a pencil mark, not a reservation — only book_appointment returning status
+ * "booked" earns booked-language. This is the backstop that stops "Done —
+ * Nobu's booked" reaching the user when nothing was booked.
+ */
+const CLAIMS_BOOKED =
+  /\b(?:booked|reserved|confirmed|reservation(?: is)? (?:confirmed|complete|done|made)|locked in|you'?re (?:booked|on for)|table(?: is)? (?:booked|reserved)|confirmation (?:number|ref|code|email))\b/i;
+
 export type PlannerResult = {
   reply: string;
   tools_used: { name: string; arguments: unknown; result: unknown }[];
@@ -159,6 +168,7 @@ export async function askPlannerLocal(
     // false-success guard's only chance to intervene.
     let nudgedRefusal = false;
     let nudgedClaim = false;
+    let nudgedBookingClaim = false;
     let forceTool = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
@@ -238,6 +248,39 @@ export async function askPlannerLocal(
             reply: "I didn't actually get that onto your calendar — say it once more and I'll take another run at it.",
             tools_used: toolsUsed,
             schedule_changed: false,
+          };
+        }
+
+        // It said a booking is done, but no booking completed. A hold or a
+        // proposal is not a reservation — only book_appointment returning
+        // status "booked" earns booked-language. Give it one forced round to
+        // actually book, then refuse to pass the fabrication on.
+        const bookingTouched = toolsUsed.some(
+          (t) => t.name === "propose_booking" || t.name === "book_appointment",
+        );
+        const bookedOk = toolsUsed.some(
+          (t) =>
+            t.name === "book_appointment" &&
+            !(t.result as { error?: unknown } | null)?.error &&
+            (t.result as { status?: unknown } | null)?.status === "booked",
+        );
+        if (bookingTouched && !bookedOk && CLAIMS_BOOKED.test(reply)) {
+          if (!nudgedBookingClaim) {
+            nudgedBookingClaim = true;
+            forceTool = true;
+            messages.push({
+              role: "system",
+              content:
+                "You just told the user a booking is done, but no tool returned status booked — a (booking…) hold or proposal is not a reservation. " +
+                "Either call book_appointment now (confirmed:true only if the user already said yes on an earlier turn), or reply plainly that it is NOT booked and say exactly what is still missing. " +
+                "Never present holds as completed bookings, never invent a confirmation reference, and never list two holds as two bookings.",
+            });
+            continue;
+          }
+          return {
+            reply: "I haven't actually completed that booking — the time is only held on your calendar. Tell me to go ahead and I'll book it properly.",
+            tools_used: toolsUsed,
+            schedule_changed: changed,
           };
         }
 

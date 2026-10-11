@@ -28,6 +28,13 @@ export type BookingIntent = {
   /** HH:MM 24h */
   endTime: string | null;
   partySize: number | null;
+  /** Booking pages need a real contact — every one of these is asked aloud. */
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  email: string | null;
+  /** Optional: "none" counts as answered. */
+  occasion: string | null;
   contactName?: string | null;
   contactPhone?: string | null;
 };
@@ -39,9 +46,24 @@ export const EMPTY_INTENT: BookingIntent = {
   startTime: null,
   endTime: null,
   partySize: null,
+  firstName: null,
+  lastName: null,
+  phone: null,
+  email: null,
+  occasion: null,
 };
 
-type SlotKey = "venue" | "area" | "date" | "time" | "partySize";
+type SlotKey =
+  | "venue"
+  | "area"
+  | "date"
+  | "time"
+  | "partySize"
+  | "first_name"
+  | "last_name"
+  | "phone"
+  | "email"
+  | "occasion";
 
 const SLOT_QUESTIONS: Record<SlotKey, string> = {
   venue: "Which place should I book?",
@@ -49,6 +71,11 @@ const SLOT_QUESTIONS: Record<SlotKey, string> = {
   date: "Which day?",
   time: "What time?",
   partySize: "How many people?",
+  first_name: "What first name should the booking go under?",
+  last_name: "And the last name?",
+  phone: "What phone number should I put down?",
+  email: "What email should I put down?",
+  occasion: "Is this for an occasion? (or say none)",
 };
 
 /** Missing slots in the order they must be asked — one question per turn. */
@@ -59,13 +86,23 @@ export function missingBookingSlots(intent: BookingIntent): SlotKey[] {
   if (!intent.date?.trim()) missing.push("date");
   if (!intent.startTime?.trim()) missing.push("time");
   if (intent.partySize == null || intent.partySize < 1) missing.push("partySize");
+  if (!intent.firstName?.trim()) missing.push("first_name");
+  if (!intent.lastName?.trim()) missing.push("last_name");
+  if (!intent.phone?.trim()) missing.push("phone");
+  if (!intent.email?.trim()) missing.push("email");
+  if (!intent.occasion?.trim()) missing.push("occasion");
   return missing;
 }
 
 /** The single next question, or null when the intent is complete. */
-export function nextBookingQuestion(intent: BookingIntent): string | null {
+export function nextBookingQuestion(intent: BookingIntent, suggestedEmail?: string | null): string | null {
   const [first] = missingBookingSlots(intent);
-  return first ? SLOT_QUESTIONS[first] : null;
+  if (!first) return null;
+  // The account email is usually the answer — offer it instead of asking cold.
+  if (first === "email" && suggestedEmail?.trim()) {
+    return `Should I use ${suggestedEmail.trim()} for the booking email, or a different one?`;
+  }
+  return SLOT_QUESTIONS[first];
 }
 
 export function isBookingComplete(intent: BookingIntent): boolean {
@@ -106,7 +143,7 @@ export function buildHoldTitle(intent: BookingIntent): string {
 }
 
 /** Fallback deep link when there is no agent window (browser users). */
-export function buildBookingSearchUrl(intent: BookingIntent): string {
+export function buildBookingSearchUrl(intent: Pick<BookingIntent, "venue" | "area">): string {
   const q = [intent.venue, intent.area, "book a table"].filter(Boolean).join(" ");
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }
