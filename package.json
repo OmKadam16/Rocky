@@ -15,6 +15,7 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "test:agent-e2e": "electron electron/test/agentE2E.cjs",
+    "test:agent-android": "node scripts/agent-android-e2e.mjs",
     "build:win": "npm run build:electron && electron-builder --win --publish never",
     "build:extension": "node scripts/build-extension.mjs",
     "screens:phone": "node scripts/phone-screens.mjs",

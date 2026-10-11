@@ -89,7 +89,10 @@ class RockyAgentBrowserPlugin : Plugin() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            useWideViewPort = true
+            // Lay every page out at the WebView's own CSS width, even pages
+            // without <meta name="viewport"> (no 980px zoomed-out "overview"):
+            // then screenshot pixels and page coordinates are the same space.
+            useWideViewPort = false
             loadWithOverviewMode = false
             mediaPlaybackRequiresUserGesture = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) safeBrowsingEnabled = true

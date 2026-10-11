@@ -87,12 +87,13 @@ const pngSize = (f) => {
   const d = fs.readFileSync(f);
   return { w: d.readUInt32BE(16), h: d.readUInt32BE(20) };
 };
-for (const dir of fs.readdirSync(res).filter((d) => /^drawable(-(land|port)-\w+)?$/.test(d))) {
+for (const dir of fs.readdirSync(res).filter((d) => /^drawable(-(land|port)-(m|h|xh|xxh|xxxh)dpi)?$/.test(d))) {
   const f = path.join(res, dir, "splash.png");
   if (!fs.existsSync(f)) continue;
   const { w, h } = pngSize(f);
   write(`${dir}/splash.png`, await draw(w, h, "splash", { bg: SPLASH.light }));
-  const night = dir === "drawable" ? "drawable-night" : dir.replace(/^drawable-/, "drawable-night-");
+  // Qualifier order matters: orientation before night mode (drawable-land-night-hdpi).
+  const night = dir === "drawable" ? "drawable-night" : dir.replace(/^drawable-(land|port)-/, "drawable-$1-night-");
   write(`${night}/splash.png`, await draw(w, h, "splash", { bg: SPLASH.dark }));
 }
 
