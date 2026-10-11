@@ -24,7 +24,7 @@ import { useFixedCommitments } from "./hooks/useFixedCommitments";
 import { useProfile } from "./hooks/useProfile";
 import { useSchedule } from "./hooks/useSchedule";
 import { useTheme } from "./hooks/useTheme";
-import { useLaptopHeartbeat } from "./lib/devices";
+import { useLaptopHeartbeat, usePhoneKeepAwake } from "./lib/devices";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { hasLocalAgent } from "./lib/agentClient";
 import { startAgentRelayHost } from "./lib/agentRelay";
@@ -111,6 +111,8 @@ export default function App() {
   const { day, week, now, loading, error, refresh } = useSchedule(calendarDate);
   // Laptop presence heartbeat (every 15 s while open) for the phone's online chip.
   useLaptopHeartbeat(isSupabaseConfigured && !authLoading && !!user);
+  // Desktop: keep the app from being suspended while a phone is paired.
+  usePhoneKeepAwake(isSupabaseConfigured && !authLoading && !!user);
   // Desktop, once per device: keys that only live in the keychain go up to the
   // shared profile row so the phone gets them too.
   useEffect(() => {

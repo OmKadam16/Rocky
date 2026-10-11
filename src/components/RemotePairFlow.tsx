@@ -11,6 +11,7 @@ import {
 } from "../lib/pairing";
 import {
   claimPair,
+  LAPTOP_ASLEEP_MESSAGE,
   PairError,
   readLaptopLastSeen,
 } from "../lib/devices";
@@ -157,7 +158,7 @@ export default function RemotePairFlow({ onPaired }: { onPaired: () => void }) {
   const errMeta: Record<string, { title: string; body: string }> = {
     expired: { title: "That code isn't active", body: "Check the code on the laptop (Profile → Devices) — each account has one code that doesn't change." },
     wrong: { title: "Different account", body: "This phone must be signed in with the same account as your laptop." },
-    offline: { title: "Can't reach your laptop", body: "Your laptop is offline or Rocky isn’t running. Open it, start Rocky, and try again." },
+    offline: { title: "Laptop asleep", body: LAPTOP_ASLEEP_MESSAGE },
   };
   const err = state === "expired" || state === "wrong" || state === "offline" ? errMeta[state] : null;
 

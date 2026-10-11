@@ -74,7 +74,7 @@ export default function RemoteHome({ onUnpaired }: { onUnpaired: () => void }) {
     presence.status === "online"
       ? { dot: "var(--color-accent)", label: "Laptop online" }
       : presence.status === "offline"
-        ? { dot: "var(--color-warm)", label: "Laptop offline" }
+        ? { dot: "var(--color-warm)", label: "Laptop asleep" }
         : { dot: "var(--color-grey-faint)", label: "Connecting…" };
 
   return (
@@ -396,7 +396,7 @@ function TalkDock({
             : assistant.state === "listening"
               ? "Tap to finish"
               : offline
-                ? "Tap to talk · laptop offline"
+                ? "Tap to talk · laptop asleep"
                 : "Tap to talk"}
         </div>
         <div className="flex w-full items-center gap-2">

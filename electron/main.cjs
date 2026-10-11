@@ -7,7 +7,7 @@
  * api.openai.com / api.elevenlabs.io and makes mic permission prompts
  * unpredictable. `app://rocky` behaves like a normal secure origin.
  */
-const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, systemPreferences } = require("electron");
+const { app, BrowserWindow, ipcMain, net, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, systemPreferences } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -93,6 +93,10 @@ function createWindow() {
       // The preload requires nothing but "electron", which sandboxed preloads
       // still provide — so the renderer process gets the OS sandbox too.
       sandbox: true,
+      // Keep timers running while minimized or hidden: the 15 s presence
+      // heartbeat and the Supabase realtime relay must not be throttled, or
+      // the phone sees the laptop as offline.
+      backgroundThrottling: false,
     },
   });
 
@@ -475,8 +479,34 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+/**
+ * Staying reachable for the phone. While a phone is paired (the renderer says
+ * so) and the app is open, Windows / macOS must not suspend the app; released
+ * when the phone is unpaired and on quit. After sleep the renderer is told to
+ * send a heartbeat right away.
+ */
+let keepAwakeId = null;
+function setKeepAwake(on) {
+  if (on && keepAwakeId == null) keepAwakeId = powerSaveBlocker.start("prevent-app-suspension");
+  if (!on && keepAwakeId != null) {
+    if (powerSaveBlocker.isStarted(keepAwakeId)) powerSaveBlocker.stop(keepAwakeId);
+    keepAwakeId = null;
+  }
+  return keepAwakeId != null;
+}
+function registerPower() {
+  ipcMain.handle("power:keepAwake", (_event, on) => setKeepAwake(on === true));
+  const wake = () => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send("power:resume");
+  };
+  powerMonitor.on("resume", wake);
+  powerMonitor.on("unlock-screen", wake);
+  app.on("will-quit", () => setKeepAwake(false));
+}
+
 app.whenReady().then(async () => {
   registerAppProtocol();
+  registerPower();
   registerSecretHandlers();
   registerBrowserHandlers();
   require("./memoryMain.cjs").registerMemory();

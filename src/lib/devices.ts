@@ -118,10 +118,68 @@ export async function publishLaptopPairing(code: string, expiresAtMs: number, la
 /** Refresh devices.last_seen for this account's laptop row (every 15 s while open). */
 export async function touchLaptopHeartbeat(): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
-  const sb = supabase();
-  const { error } = await sb.from("devices").update({ last_seen: new Date().toISOString() }).eq("role", "laptop");
-  if (error) return false;
-  return true;
+  try {
+    const sb = supabase();
+    const { error } = await sb.from("devices").update({ last_seen: new Date().toISOString() }).eq("role", "laptop");
+    return !error;
+  } catch {
+    return false; // offline: fetch throws
+  }
+}
+
+/** One failed heartbeat is retried once after this long. */
+export const HEARTBEAT_RETRY_MS = 3000;
+
+export type BeatReason = "start" | "interval" | "focus" | "online" | "visible" | "resume" | "retry";
+
+/**
+ * The laptop heartbeat loop (pure; timers are the global ones, so tests use
+ * fake timers). Beats right away, every `intervalMs`, and whenever `beat()` is
+ * called (focus, network back, wake from sleep). A failed beat is retried once
+ * after `retryMs`; overlapping beats are skipped.
+ */
+export function createHeartbeat(
+  touch: () => Promise<boolean>,
+  opts: { intervalMs?: number; retryMs?: number; onResult?: (ok: boolean, reason: BeatReason) => void } = {},
+) {
+  const intervalMs = opts.intervalMs ?? HEARTBEAT_MS;
+  const retryMs = opts.retryMs ?? HEARTBEAT_RETRY_MS;
+  let inflight = false;
+  let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const beat = async (reason: BeatReason): Promise<boolean> => {
+    if (stopped || inflight) return false;
+    inflight = true;
+    let ok = false;
+    try {
+      ok = await touch();
+    } catch {
+      ok = false;
+    } finally {
+      inflight = false;
+    }
+    opts.onResult?.(ok, reason);
+    if (!ok && reason !== "retry" && !stopped && !retryTimer) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void beat("retry");
+      }, retryMs);
+    }
+    return ok;
+  };
+
+  void beat("start");
+  const interval = setInterval(() => void beat("interval"), intervalMs);
+  return {
+    beat,
+    stop() {
+      stopped = true;
+      clearInterval(interval);
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+    },
+  };
 }
 
 export interface LaptopPresence {
@@ -204,6 +262,9 @@ export async function readPairDevices(): Promise<{ laptop: PairDeviceRow | null;
 // Laptop presence — the ONLY source of the online/offline chip.
 // ---------------------------------------------------------------------------
 
+/** What the phone says when the laptop's heartbeat is older than 45 s. */
+export const LAPTOP_ASLEEP_MESSAGE = "Your laptop is asleep or closed. Wake it and open Rocky.";
+
 export type PresenceStatus = "connecting" | "online" | "offline";
 
 export function statusFromLastSeen(lastSeenMs: number | null, now: number = Date.now()): PresenceStatus {
@@ -253,13 +314,64 @@ export function useLaptopPresence(enabled: boolean): LaptopPresenceState {
   return state;
 }
 
-/** Laptop tab heartbeat: refresh last_seen every 15 s while the app is open. */
+type PowerBridge = { keepAwake: (on: boolean) => Promise<boolean>; onResume: (h: () => void) => () => void };
+const powerBridge = (): PowerBridge | null =>
+  (typeof window !== "undefined" && (window as unknown as { rocky?: { power?: PowerBridge } }).rocky?.power) || null;
+
+/**
+ * Laptop heartbeat: last_seen now, every 15 s, and again on window focus,
+ * network back online, tab visible and wake from sleep (desktop), with one
+ * retry 3 s after a failure. The desktop window isn't throttled when
+ * minimized (backgroundThrottling: false in electron/main.cjs).
+ */
 export function useLaptopHeartbeat(enabled: boolean): void {
   useEffect(() => {
     if (!enabled || !isSupabaseConfigured) return;
-    void touchLaptopHeartbeat();
-    const id = window.setInterval(() => void touchLaptopHeartbeat(), HEARTBEAT_MS);
-    return () => window.clearInterval(id);
+    const hb = createHeartbeat(touchLaptopHeartbeat);
+    const onFocus = () => void hb.beat("focus");
+    const onOnline = () => void hb.beat("online");
+    const onVisible = () => document.visibilityState === "visible" && void hb.beat("visible");
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    const offResume = powerBridge()?.onResume(() => void hb.beat("resume"));
+    return () => {
+      hb.stop();
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+      offResume?.();
+    };
+  }, [enabled]);
+}
+
+/**
+ * Desktop: while a phone is paired, ask the OS not to suspend Rocky
+ * (powerSaveBlocker "prevent-app-suspension" in main); released on unpair
+ * and on quit.
+ */
+export function usePhoneKeepAwake(enabled: boolean): void {
+  useEffect(() => {
+    const power = powerBridge();
+    if (!enabled || !power || !isSupabaseConfigured) return;
+    let alive = true;
+    const check = async () => {
+      const phone = await readPhoneDevice().catch(() => null);
+      if (alive) void power.keepAwake(phone != null).catch(() => {});
+    };
+    void check();
+    const id = window.setInterval(() => void check(), 60_000);
+    const sb = supabase();
+    const channel = sb
+      .channel(uniqueChannel("laptop-keep-awake"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "devices" }, () => void check())
+      .subscribe();
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      void sb.removeChannel(channel);
+      void power.keepAwake(false).catch(() => {});
+    };
   }, [enabled]);
 }
 

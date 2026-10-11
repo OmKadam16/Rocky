@@ -14,6 +14,7 @@
 import { supabase, uniqueChannel } from "./supabase";
 import { applyAgentEvent, setRelayBackend, startAgent, prepareAgent, answerAgent, confirmAgent, continueAgent, cancelAgent, tapAgentEvents, type AgentBackend, type AgentEvent } from "./agentClient";
 import type { AgentTask } from "./bookingTask";
+import { LAPTOP_ASLEEP_MESSAGE, readLaptopLastSeen, statusFromLastSeen } from "./devices";
 
 export const REQUEST_MARK = "rocky-agent:v1";
 export const EVENT_MARK = "rocky-agent-event:v1";
@@ -181,6 +182,8 @@ async function send(op: RelayOp): Promise<{ ok: boolean; error?: string }> {
       }
       if (r && r.status === "error") return { ok: false, error: "Your laptop didn't take that." };
     }
+    const presence = await readLaptopLastSeen().catch(() => null);
+    if (statusFromLastSeen(presence?.lastSeenMs ?? null) === "offline") return { ok: false, error: LAPTOP_ASLEEP_MESSAGE };
     return { ok: false, error: "Your laptop isn't answering. Open Rocky on the laptop (the desktop app) and try again." };
   } finally {
     // The phone's own rows go as soon as they're answered (or time out).

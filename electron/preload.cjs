@@ -25,6 +25,16 @@ contextBridge.exposeInMainWorld("rocky", {
       return () => ipcRenderer.removeListener("update:state", listener);
     },
   },
+  power: {
+    /** Ask the OS not to suspend Rocky while a phone is paired. */
+    keepAwake: (on) => ipcRenderer.invoke("power:keepAwake", on === true),
+    /** Called after the computer wakes from sleep; returns an unsubscribe function. */
+    onResume: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on("power:resume", listener);
+      return () => ipcRenderer.removeListener("power:resume", listener);
+    },
+  },
   shell: {
     openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   },
