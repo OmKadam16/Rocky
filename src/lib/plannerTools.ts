@@ -47,6 +47,7 @@ export const MUTATING_TOOLS = new Set([
   "flag_unresolvable_conflict",
   "add_note_to_block",
   "delete_block",
+  "delete_blocks",
   "reschedule_block",
   "add_assignment",
   "add_assignment_part",
@@ -284,6 +285,27 @@ const ALL_TOOL_SCHEMAS: ChatCompletionTool[] = [
           confirmed: { type: "boolean", description: "True only after the user said yes on a later turn" },
         },
         required: ["block_query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_blocks",
+      description:
+        "Delete SEVERAL scheduled blocks at once: 'clear today', 'remove everything tomorrow', 'delete all my blocks this afternoon', 'cancel all the Nobu holds'. Pick them by date range, optional time window and optional title words. The first call (no confirmed) changes nothing and returns needs_confirmation with the exact list, the count and the fixed commitments that stay: read the list back in ONE sentence and ask ONCE, e.g. 'Remove both blocks today, Nobu at seven this morning and Nobu Newport Beach at seven tonight? Say yes or tap Confirm'. When the user says yes, call it again with confirmed: true and the same filters (plus block_ids from the preview): it deletes the whole list in one go. Never ask block by block. Never deletes fixed commitments. Use delete_block for a single block.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "YYYY-MM-DD, first day of the range (today's date for 'today')" },
+          end_date: { type: "string", description: "Optional YYYY-MM-DD, last day of the range (defaults to date)" },
+          from_time: { type: "string", description: "Optional HH:MM: only blocks still running after this ('this afternoon' -> 12:00)" },
+          to_time: { type: "string", description: "Optional HH:MM: only blocks starting before this" },
+          title_query: { type: "string", description: "Optional words the titles must contain ('Nobu', 'study'). Omit for everything." },
+          block_ids: { type: "array", items: { type: "string" }, description: "On the confirmed call: the block_ids from the preview" },
+          confirmed: { type: "boolean", description: "True only after the user said yes to the preview on a later turn" },
+        },
+        required: ["date"],
       },
     },
   },
@@ -559,6 +581,8 @@ async function summarizeNote(raw: string, ctx?: ToolContext): Promise<string> {
     if (!ctx) return text.slice(0, 60).toLowerCase();
     const completion = await ctx.openai.chat.completions.create({
       model: ctx.model,
+      // A 2-4 word summary needs no reasoning (GPT-5 models only serve OpenAI).
+      ...(/^gpt-5(-mini|-nano)?$/i.test(ctx.model) ? { reasoning_effort: "minimal" as const } : {}),
       messages: [
         {
           role: "system",
@@ -578,7 +602,11 @@ async function summarizeNote(raw: string, ctx?: ToolContext): Promise<string> {
 
 async function weekSchedule(startDate?: string) {
   const anchor = startDate ?? toISODate(new Date());
-  const dates = weekDates(anchor);
+  return { week_of: mondayOf(anchor), ...(await daysSchedule(weekDates(anchor))) };
+}
+
+/** The given dates, each with its fixed commitments, blocks and free windows. */
+async function daysSchedule(dates: string[]) {
   const [blocks, commitments, prefs] = await Promise.all([
     loadBlocks(dates[0], dates[6]),
     loadCommitments(),
@@ -586,7 +614,6 @@ async function weekSchedule(startDate?: string) {
   ]);
 
   return {
-    week_of: mondayOf(anchor),
     days: dates.map((date) => {
       const weekday = parseISODate(date).getDay();
       const dayCommitments = commitments.filter(
@@ -1215,6 +1242,9 @@ export async function runTool(name: string, args: Args, ctx?: ToolContext): Prom
       return { deleted: true, fast_path: Boolean(fastPath && args.confirmed !== true), block: target };
     }
 
+    case "delete_blocks":
+      return deleteBlocks(args);
+
     case "reschedule_block": {
       const query = String(args.block_query ?? "").trim();
       const newDate = String(args.new_date ?? "").trim();
@@ -1371,16 +1401,85 @@ function freeWindows(
 const fromMinutes = (m: number) =>
   `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
+/**
+ * The last delete_blocks preview. A "yes" on the next turn deletes exactly
+ * that list, even if the model forgets to pass the ids back.
+ */
+let pendingBulkDelete: { ids: string[]; at: number } | null = null;
+const BULK_PREVIEW_TTL_MS = 10 * 60_000;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function deleteBlocks(args: Args) {
+  const date = String(args.date ?? "").trim();
+  if (!ISO_DATE.test(date)) return { error: "date (YYYY-MM-DD) is required" };
+  const endDate = ISO_DATE.test(String(args.end_date ?? "")) ? String(args.end_date) : date;
+  const from = timeHintToMinutes(args.from_time);
+  const to = timeHintToMinutes(args.to_time);
+  const query = String(args.title_query ?? "").trim();
+  const all = await db.scheduled_blocks.toArray();
+  const picked = selectBlocksForBulkDelete(all, { date, endDate, from, to, query });
+
+  if (args.confirmed === true) {
+    const given = Array.isArray(args.block_ids) ? (args.block_ids as unknown[]).map(String) : [];
+    const pending = pendingBulkDelete && Date.now() - pendingBulkDelete.at < BULK_PREVIEW_TTL_MS ? pendingBulkDelete.ids : [];
+    const wanted = new Set(given.length ? given : pending.length ? pending : picked.map((b) => b.id));
+    const rows = all.filter((b) => wanted.has(b.id));
+    if (!rows.length) return { error: "Nothing left to delete: those blocks are already gone." };
+    for (const b of rows) await db.scheduled_blocks.delete(b.id);
+    pendingBulkDelete = null;
+    return { deleted: rows.length, blocks: rows.map(blockSummary) };
+  }
+
+  const commitments = (await db.fixed_commitments.toArray()).filter((c) => {
+    for (let d = date; d <= endDate; d = addDays(d, 1)) if (c.days_of_week.includes(parseISODate(d).getDay()) && isActive(d, c)) return true;
+    return false;
+  });
+  const span = date === endDate ? date : `${date} to ${endDate}`;
+  if (!picked.length) {
+    return {
+      nothing_to_delete: true,
+      message: `No scheduled blocks ${query ? `matching "${query}" ` : ""}on ${span}${from !== null || to !== null ? " in that time window" : ""}.`,
+      fixed_commitments_that_stay: commitments.map((c) => c.name),
+    };
+  }
+  pendingBulkDelete = { ids: picked.map((b) => b.id), at: Date.now() };
+  return {
+    needs_confirmation: true,
+    count: picked.length,
+    blocks: picked.map(blockSummary),
+    block_ids: picked.map((b) => b.id),
+    fixed_commitments_that_stay: commitments.map((c) => c.name),
+    preview: `Delete ${picked.length === 1 ? "this block" : `these ${picked.length} blocks`}: ${picked.map((b) => `${b.title} ${b.date} ${trimTime(b.start_time)}-${trimTime(b.end_time)}`).join("; ")}? Say yes or tap Confirm`,
+  };
+}
+
+const blockSummary = (b: ScheduledBlockRow) => ({ id: b.id, title: b.title, date: b.date, start_time: trimTime(b.start_time), end_time: trimTime(b.end_time) });
+
+/** Which blocks a bulk delete covers (pure; tested). Sorted by date and time. */
+export function selectBlocksForBulkDelete(
+  blocks: ScheduledBlockRow[],
+  f: { date: string; endDate: string; from: number | null; to: number | null; query: string },
+): ScheduledBlockRow[] {
+  return blocks
+    .filter((b) => b.date >= f.date && b.date <= f.endDate)
+    .filter((b) => (f.from === null || minutesOf(trimTime(b.end_time)) > f.from) && (f.to === null || minutesOf(trimTime(b.start_time)) < f.to))
+    .filter((b) => !f.query || matchesQuery(b.title, f.query))
+    .sort((a, b) => (a.date === b.date ? minutesOf(trimTime(a.start_time)) - minutesOf(trimTime(b.start_time)) : a.date < b.date ? -1 : 1));
+}
+
 export async function contextSnapshot() {
   const today = toISODate(new Date());
-  const [week, tasks, prefs, commitments, todayBlocks] = await Promise.all([
-    weekSchedule(today),
+  // A rolling window (today + the next 7 days), not the Monday-Sunday week:
+  // on a Sunday the calendar week ends today and "tomorrow" was missing.
+  const [days, tasks, prefs, commitments, todayBlocks] = await Promise.all([
+    daysSchedule(Array.from({ length: 8 }, (_, i) => addDays(today, i))),
     loadTasks(),
     loadPreferences(),
     loadCommitments(),
     loadBlocks(today, today),
   ]);
 
+  const week = { week_of: today, ...days };
   const todayDay = week.days.find((d) => d.date === today);
   const todaySchedule = {
     date: today,

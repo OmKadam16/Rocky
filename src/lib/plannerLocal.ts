@@ -10,6 +10,7 @@ import { BOOKING_TOOL_NAMES, agentWaitingContext } from "./bookingTools";
 import { COMMITMENT_TOOL_NAMES } from "./commitmentTools";
 import { isAgentActive } from "./agentClient";
 import { describeFree, detectUrgency, enforceExplicitTime, explicitWindow, isProvablyFree, parseRequestedWindow } from "./availability";
+import { calendarGlance } from "./calendarGlance";
 import type { AssistantTurn } from "../types";
 
 /** The last few turns the cloud planner may see: never private ones. */
@@ -18,6 +19,18 @@ export function plannerHistory(history: AssistantTurn[], max = 8): AssistantTurn
 }
 
 const MAX_TOOL_ROUNDS = 8;
+
+/**
+ * Speed settings for OpenAI's GPT-5 family. Left alone they reason at
+ * "medium" effort on every round, which made a gpt-5-nano turn take many
+ * seconds. Calendar work needs little hidden reasoning: the context hands
+ * the model free windows and a plain-text calendar, and the tools check
+ * everything in code. Other providers / models get nothing extra.
+ */
+export function speedParams(provider: string, model: string): { reasoning_effort?: "low"; verbosity?: "low" } {
+  if (provider !== "OpenAI" || !/^gpt-5/i.test(model)) return {};
+  return { reasoning_effort: "low", verbosity: "low" };
+}
 
 /**
  * Phrases that assert the calendar changed.
@@ -185,6 +198,9 @@ export async function askPlannerLocal(
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: SYSTEM_PROMPT + about },
       ...(memory ? [{ role: "system", content: memory } as ChatCompletionMessageParam] : []),
+      // The calendar in plain lines first (what small models read best), then
+      // the same data as JSON for ids, notes and details.
+      { role: "system", content: calendarGlance(snapshot) },
       {
         role: "system",
         content: `Current context (JSON). Today is ${snapshot.today} (${snapshot.today_weekday}), the time is ${snapshot.now}. ` +
@@ -248,6 +264,7 @@ export async function askPlannerLocal(
         model,
         messages,
         tools: toolSchemas,
+        ...speedParams(provider, model),
         // A corrective round forces a call: asking the model to go and check
         // was not enough, so it no longer gets to answer from memory.
         tool_choice: forceTool ? "required" : "auto",
